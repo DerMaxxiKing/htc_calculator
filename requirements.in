@@ -1,0 +1,7 @@
+wheel
+sqlalchemy
+pandas
+numpy
+lazy_object_proxy
+mutableint
+pyqt5

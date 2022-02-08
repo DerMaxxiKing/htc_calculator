@@ -1,0 +1,16 @@
+FROM boomanaiden154/freecad:latest
+
+RUN apk add py3-pip
+
+# start with more uptodate packages
+#
+
+ENV FreeCADPath="/usr/lib/freecad/lib"
+#
+COPY tests/test_imports.py /tmp/test_imports.py
+COPY python_startup2.py .
+
+ENV FREECAD_STARTUP_FILE ./python_startup2.py
+ENV PYTHONSTARTUP ${FREECAD_STARTUP_FILE}
+
+RUN python3 /tmp/test_imports.py

@@ -1,0 +1,7 @@
+include README.rst
+include LICENSE.txt
+include requirements.txt
+recursive-exclude tests *
+graft src/py_plot_tools/resources
+graft src/py_plot_tools/basic_geometries/gui_adaptions/infos/generated
+graft src/py_plot_tools/generated
