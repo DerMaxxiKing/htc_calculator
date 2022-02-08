@@ -4,7 +4,7 @@ from .reference_face import ReferenceFace
 from .tools import project_point_on_line, export_objects
 from .face import Face
 from .solid import Solid, PipeSolid
-from .meshing.block_mesh import BlockMeshVertex, Block, create_o_grid_block
+from .meshing.block_mesh import BlockMeshVertex, Block, create_o_grid_blocks
 
 import FreeCAD
 import Part as FCPart
@@ -242,9 +242,10 @@ class ActivatedReferenceFace(ReferenceFace):
     def create_o_grid(self):
 
         wire = self.pipe.pipe_wire
+        blocks = [None] * wire.Edges.__len__()
 
         for i, edge in enumerate(wire.Edges):
-            create_o_grid_block(edge, self)
+            blocks[i] = create_o_grid_blocks(edge, self)
 
 
 
