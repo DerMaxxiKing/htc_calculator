@@ -1,6 +1,9 @@
 import os
 import sys
 import numpy as np
+import pathlib
+import gmsh
+import meshio
 
 import FreeCAD
 import Part as FCPart
@@ -11,10 +14,6 @@ from OCC.Core.BRepBndLib import brepbndlib_AddOBB
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
 from OCC.Core.gp import gp_Pnt, gp_Ax2, gp_Dir, gp_XYZ
 from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
-
-from .face import Face
-from .solid import Solid
-from .assembly import Assembly
 
 App = FreeCAD
 
@@ -98,6 +97,8 @@ def project_point_on_line(point, line):
 
 
 def export_objects(objects, filename):
+    file_suffix = pathlib.Path(filename).suffix
+
     doc = App.newDocument()
 
     for i, object in enumerate(objects):
@@ -105,10 +106,18 @@ def export_objects(objects, filename):
         __o__.Label = f'edge{i}'
         __o__.Shape = object
 
-    FCPart.export(doc.Objects, filename)
+    if file_suffix == '.FCStd':
+        doc.recompute()
+        doc.saveCopy(filename)
+    else:
+        FCPart.export(doc.Objects, filename)
 
 
 def import_file(filename):
+
+    from .face import Face
+    from .solid import Solid
+    from .assembly import Assembly
 
     imported_shape = FCPart.Shape()
     imported_shape.read(filename)
@@ -199,4 +208,60 @@ def create_obb(points, box_points=True):
         return aBox
 
 
+def extract_to_meshio():
+    # extract point coords
+    idx, points, _ = gmsh.model.mesh.getNodes()
+    points = np.asarray(points).reshape(-1, 3)
+    idx -= 1
+    srt = np.argsort(idx)
+    assert np.all(idx[srt] == np.arange(len(idx)))
+    points = points[srt]
+
+    # extract cells
+    elem_types, elem_tags, node_tags = gmsh.model.mesh.getElements()
+    cells = []
+    for elem_type, elem_tags, node_tags in zip(elem_types, elem_tags, node_tags):
+        # `elementName', `dim', `order', `numNodes', `localNodeCoord',
+        # `numPrimaryNodes'
+        num_nodes_per_cell = gmsh.model.mesh.getElementProperties(elem_type)[3]
+
+        node_tags_reshaped = np.asarray(node_tags).reshape(-1, num_nodes_per_cell) - 1
+        node_tags_sorted = node_tags_reshaped[np.argsort(elem_tags)]
+        cells.append(
+            meshio.CellBlock(
+                meshio.gmsh.gmsh_to_meshio_type[elem_type], node_tags_sorted
+            )
+        )
+
+    cell_sets = {}
+    for dim, tag in gmsh.model.getPhysicalGroups():
+        name = gmsh.model.getPhysicalName(dim, tag)
+        cell_sets[name] = [[] for _ in range(len(cells))]
+        for e in gmsh.model.getEntitiesForPhysicalGroup(dim, tag):
+            # TODO node_tags?
+            # elem_types, elem_tags, node_tags
+            elem_types, elem_tags, _ = gmsh.model.mesh.getElements(dim, e)
+            assert len(elem_types) == len(elem_tags)
+            assert len(elem_types) == 1
+            elem_type = elem_types[0]
+            elem_tags = elem_tags[0]
+
+            meshio_cell_type = meshio.gmsh.gmsh_to_meshio_type[elem_type]
+            # make sure that the cell type appears only once in the cell list
+            # -- for now
+            idx = []
+            for k, cell_block in enumerate(cells):
+                if cell_block.type == meshio_cell_type:
+                    idx.append(k)
+            assert len(idx) == 1
+            idx = idx[0]
+            cell_sets[name][idx].append(elem_tags - 1)
+
+        cell_sets[name] = [
+            (None if len(idcs) == 0 else np.concatenate(idcs))
+            for idcs in cell_sets[name]
+        ]
+
+    # make meshio mesh
+    return meshio.Mesh(points, cells, cell_sets=cell_sets)
 # axis coming soon

@@ -7,8 +7,10 @@ from src.htc_calculator.meshing.mesh_setup import MeshSetup
 
 vertices = np.array([[0, 0, 0],
                      [5000, 0, 0],
-                     [5000, 6000, 0],
-                     [0, 6000, 0]])
+                     [5000, 5000, 0],
+                     [2500, 5000, 0],
+                     [2500, 2500, 0],
+                     [0, 2500, 0]])
 
 concrete = Material(name='concrete',
                     density=2600,

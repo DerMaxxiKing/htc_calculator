@@ -436,6 +436,10 @@ class PipeSolid(Solid):
 
         # create inflow
         V1 = wires[0].Edges[start_edge_id].Vertex1.Point + tube_main_dir * 2 * self.tube_edge_distance
+        V2 = wires[0].Edges[start_edge_id].Vertex1.Point + tube_main_dir * 1 * self.tube_edge_distance
+        pipe_edges.append(FCPart.LineSegment(V1, V2).toShape())
+
+        V1 = wires[0].Edges[start_edge_id].Vertex1.Point + tube_main_dir * 1 * self.tube_edge_distance
         V2 = wires[0].Edges[start_edge_id].Vertex1.Point
         pipe_edges.append(FCPart.LineSegment(V1, V2).toShape())
 

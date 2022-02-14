@@ -6,8 +6,11 @@ import time
 import re
 from io import StringIO
 import numpy as np
+import gmsh
+# from pygmsh.helpers import extract_to_meshio
 
 from .logger import logger
+from .tools import extract_to_meshio
 from .meshing.surface_mesh_parameters import SurfaceMeshParameters, default_surface_mesh_parameter
 
 import FreeCAD
@@ -156,6 +159,96 @@ class Face(object):
                 os.remove(tmp_file)
             except FileNotFoundError as e:
                 pass
+
+    def create_mesh(self, max_length=99999999):
+        mesh_shp = MeshPart.meshFromShape(Shape=self.fc_face,
+                                          MaxLength=max_length)
+        return mesh_shp
+
+    def create_hex_g_mesh(self, lc=999999):
+
+        gmsh.initialize([])
+        gmsh.model.add(f'{self.txt_id}')
+
+        try:
+            geo = gmsh.model.geo
+
+            vertices = [tuple(x.Point) for x in self.fc_face.Vertexes]
+            edges = [x for x in self.fc_face.Wires[0].OrderedEdges]
+
+            vertex_lookup = dict(zip(vertices, range(vertices.__len__())))
+
+            lc_p = lc
+            for i, vertex in enumerate(vertices):
+                geo.addPoint(vertex[0], vertex[1], vertex[2], lc_p, i + 1)
+
+            gmsh.model.geo.synchronize()
+
+            last_point = None
+            edge_orientations = [None] * edges.__len__()
+
+            for i, edge in enumerate(edges):
+                try:
+                    p1 = vertex_lookup[tuple(edge.Vertexes[0].Point)] + 1
+                    p2 = vertex_lookup[tuple(edge.Vertexes[1].Point)] + 1
+                    geo.addLine(p1, p2, i + 1)
+                    if last_point is not None:
+                        if p1 == last_point:
+                            edge_orientations[i] = 1
+                            last_point = p2
+                        else:
+                            edge_orientations[i] = -1
+                            last_point = p1
+                    else:
+                        edge_orientations[i] = 1
+                        last_point = p2
+                except Exception as e:
+                    logger.error(f'Error adding edge {edge}:\n{e}')
+            gmsh.model.geo.synchronize()
+
+            ids = (np.array(range(edges.__len__())) + 1) * np.array(edge_orientations)
+            geo.addCurveLoop(ids, 1)
+            gmsh.model.geo.synchronize()
+
+            geo.addPlaneSurface([1], 1)
+            gmsh.model.geo.synchronize()
+
+            gmsh.option.setNumber("General.Terminal", 1)
+            gmsh.option.setNumber("Mesh.MeshSizeMin", 1)
+            gmsh.option.setNumber("Mesh.MeshSizeMax", lc)
+
+            # Finally, while the default "Frontal-Delaunay" 2D meshing algorithm
+            # (Mesh.Algorithm = 6) usually leads to the highest quality meshes, the
+            # "Delaunay" algorithm (Mesh.Algorithm = 5) will handle complex mesh size fields
+            # better - in particular size fields with large element size gradients:
+            # gmsh.option.setNumber("Mesh.Algorithm", 5)
+
+            # gmsh.option.setNumber("Mesh.Algorithm", 8)
+            gmsh.option.setNumber("Mesh.RecombinationAlgorithm", 2)
+            gmsh.model.mesh.generate(2)
+            gmsh.model.mesh.optimize('Relocate2D')
+
+            # recombine to quad mesh
+            # https://gitlab.onelab.info/gmsh/gmsh/-/issues/784
+            gmsh.option.setNumber('General.Terminal', 1)
+            # gmsh.model.mesh.setRecombine(2, 1)
+            # gmsh.option.setNumber('SubdivisionAlgorithm ', 2)
+            gmsh.model.mesh.recombine()
+            # gmsh.model.mesh.recombine()
+            mesh = extract_to_meshio()
+            # mesh.write('/tmp/test.vtk')
+
+        except Exception as e:
+            logger.error(f'Error creating mesh for face {self.id}')
+            gmsh.finalize()
+            raise e
+
+        gmsh.finalize()
+
+
+
+        return mesh
+
 
     def __repr__(self):
         rep = f'Face {self.name} {self.id} {self.area}'

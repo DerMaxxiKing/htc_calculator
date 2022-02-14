@@ -4,10 +4,12 @@ import math
 # import sys
 import os
 import numpy as np
+import gmsh
 # import ntpath
 #
 # import subprocess
 # from shutil import copyfile
+from ..logger import logger
 
 
 import tempfile
@@ -205,4 +207,3 @@ def create_snappy_hex_mesh_dict(reference_face, case_dir):
     # copyfile(source, dst)
 
     print('finished')
-

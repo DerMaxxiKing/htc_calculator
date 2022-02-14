@@ -5,6 +5,8 @@ from .tools import project_point_on_line, export_objects
 from .face import Face
 from .solid import Solid, PipeSolid
 from .meshing.block_mesh import BlockMeshVertex, Block, create_o_grid_blocks
+from .logger import logger
+from .tools import export_objects
 
 import FreeCAD
 import Part as FCPart
@@ -242,14 +244,58 @@ class ActivatedReferenceFace(ReferenceFace):
     def create_o_grid(self):
 
         wire = self.pipe.pipe_wire
-        blocks = [None] * wire.Edges.__len__()
+        blocks = []
 
         for i, edge in enumerate(wire.Edges):
-            blocks[i] = create_o_grid_blocks(edge, self)
 
+            if (i == 0) or (i == wire.Edges.__len__() - 1):
+                outer_pipe = False
+            else:
+                outer_pipe = True
 
+            logger.info(f'creating block {i} of {wire.Edges.__len__()}')
 
-        pass
+            if type(edge.Curve) is FCPart.Line:
+                blocks.append(create_o_grid_blocks(edge, self, outer_pipe=outer_pipe))
+            else:
+                # split edge:
+                sub_edges = edge.split((edge.LastParameter-edge.FirstParameter) / 2).SubShapes
+                for sub_edge in sub_edges:
+                    sub_edge.Placement = edge.Placement
+                    blocks.append(create_o_grid_blocks(sub_edge, self, outer_pipe=outer_pipe))
+
+        Block.save_fcstd('/tmp/blocks.FCStd')
+
+        comp_solid = Block.comp_solid
+
+        # move reference face in pipe layer:
+        mv_vec = self.layer_dir * self.normal * (- self.component_construction.side_1_offset + self.tube_side_1_offset)
+
+        ref_face = self.reference_face.copy()
+
+        edges = []
+        for i, edge in enumerate(ref_face.OuterWire.Edges):
+            if i == self.reference_edge_id:
+                new_edges1 = edge.split(float(edge.FirstParameter + self.tube_edge_distance + self.bending_radius)).Edges
+                edges.append(new_edges1[0])
+                edges.extend(new_edges1[1].split(float(edge.LastParameter - (2 * self.tube_distance + self.tube_edge_distance + self.bending_radius))).Edges)
+            else:
+                new_edges1 = edge.split(float(edge.FirstParameter + self.tube_edge_distance + self.bending_radius)).Edges
+                edges.append(new_edges1[0])
+                edges.extend(new_edges1[1].split(float(edge.LastParameter - self.tube_edge_distance - self.bending_radius)).Edges)
+
+        splitted_wire = FCPart.Wire(edges)
+        ref_face2 = FCPart.Face(splitted_wire).translate(mv_vec)
+        export_objects(ref_face2.Edges, '/tmp/edges.FCStd')
+
+        cutted_face = ref_face2.cut(comp_solid)
+        quad_meshes = [Face(fc_face=x).create_hex_g_mesh(lc=9999999999) for x in cutted_face.SubShapes]
+
+        [x.write(f'/tmp/quad_mesh{i}.vtk') for i, x in enumerate(quad_meshes)]
+
+        export_objects([ref_face2, cutted_face, comp_solid], '/tmp/cutted_face.FCStd')
+
+        print('done')
 
 
     # def generate_hole_part(self):
