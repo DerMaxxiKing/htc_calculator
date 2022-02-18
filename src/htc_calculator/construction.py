@@ -12,6 +12,8 @@ class Material(object):
         self.specific_heat_capacity = kwargs.get('specific_heat_capacity', 1000)
         self.heat_conductivity = kwargs.get('heat_conductivity', 1000)
 
+        self.roughness = kwargs.get('roughness', None)
+
 
 class Layer(object):
 

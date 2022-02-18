@@ -12,6 +12,12 @@ vertices = np.array([[0, 0, 0],
                      [2500, 2500, 0],
                      [0, 2500, 0]])
 
+tube_material = Material(name='Tube Material',
+                         density=1800,
+                         specific_heat_capacity=700,
+                         heat_conductivity=0.4,
+                         roughness=0.0004)
+
 concrete = Material(name='concrete',
                     density=2600,
                     specific_heat_capacity=1000,
@@ -58,6 +64,8 @@ tabs1 = ActivatedReferenceFace(vertices=vertices,
                                component_construction=test_construction,
                                start_edge=0,
                                tube_diameter=20,
+                               tube_inner_diameter=16,
+                               tube_material=tube_material,
                                tube_distance=250,
                                tube_edge_distance=300,
                                bending_radius=100,
@@ -68,8 +76,8 @@ tabs1 = ActivatedReferenceFace(vertices=vertices,
 tabs1.export_stl('/tmp/test_stls')
 tabs1.save_fcstd('/tmp/assembly.FCStd')
 tabs1.create_o_grid()
-tabs1.generate_shm_mesh()
+# tabs1.generate_shm_mesh()
 
-tabs1.generate_mesh()
+# tabs1.generate_mesh()
 
 print('done')

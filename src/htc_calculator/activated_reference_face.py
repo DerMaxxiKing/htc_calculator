@@ -4,7 +4,7 @@ from .reference_face import ReferenceFace
 from .tools import project_point_on_line, export_objects
 from .face import Face
 from .solid import Solid, PipeSolid
-from .meshing.block_mesh import BlockMeshVertex, Block, create_o_grid_blocks
+from .meshing.block_mesh import BlockMeshVertex, BlockMeshEdge, Block, create_o_grid_blocks, create_blocks_from_2d_mesh
 from .logger import logger
 from .tools import export_objects
 
@@ -33,6 +33,8 @@ class ActivatedReferenceFace(ReferenceFace):
         self.plain_reference_face_solid = ReferenceFace(*args, **kwargs)
 
         self.tube_diameter = kwargs.get('tube_diameter', 0.02)
+        self.tube_inner_diameter = kwargs.get('tube_inner_diameter', 0.016)
+        self.tube_material = kwargs.get('tube_material', None)
         self.tube_distance = kwargs.get('tube_distance', 0.50)
         self.tube_side_1_offset = kwargs.get('tube_side_1_offset', 0.085)
         self.tube_edge_distance = kwargs.get('tube_edge_distance', 0.50)
@@ -248,25 +250,39 @@ class ActivatedReferenceFace(ReferenceFace):
 
         for i, edge in enumerate(wire.Edges):
 
-            if (i == 0) or (i == wire.Edges.__len__() - 1):
+            if i == 0:
                 outer_pipe = False
+                inlet = True
+                outlet = False
+            elif i == wire.Edges.__len__() - 1:
+                outer_pipe = False
+                inlet = False
+                outlet = True
             else:
                 outer_pipe = True
+                inlet = False
+                outlet = False
 
             logger.info(f'creating block {i} of {wire.Edges.__len__()}')
 
             if type(edge.Curve) is FCPart.Line:
-                blocks.append(create_o_grid_blocks(edge, self, outer_pipe=outer_pipe))
+                logger.debug(f'creating block {i} of {wire.Edges.__len__()} as line')
+                new_blocks = create_o_grid_blocks(edge, self, outer_pipe=outer_pipe, inlet=inlet, outlet=outlet)
+                blocks.append(new_blocks)
             else:
                 # split edge:
+                logger.debug(f'creating block {i} of {wire.Edges.__len__()} as arc')
                 sub_edges = edge.split((edge.LastParameter-edge.FirstParameter) / 2).SubShapes
-                for sub_edge in sub_edges:
-                    sub_edge.Placement = edge.Placement
-                    blocks.append(create_o_grid_blocks(sub_edge, self, outer_pipe=outer_pipe))
+                # for sub_edge in sub_edges:
+                #     sub_edge.Placement = edge.Placement
+                #     new_blocks = create_o_grid_blocks(sub_edge, self, outer_pipe=outer_pipe, inlet=inlet, outlet=outlet)
+                #     blocks.append(new_blocks)
+                new_blocks = create_o_grid_blocks(edge, self, outer_pipe=outer_pipe, inlet=inlet, outlet=outlet)
+                blocks.append(new_blocks)
 
         Block.save_fcstd('/tmp/blocks.FCStd')
 
-        comp_solid = Block.comp_solid
+        # comp_solid = Block.comp_solid
 
         # move reference face in pipe layer:
         mv_vec = self.layer_dir * self.normal * (- self.component_construction.side_1_offset + self.tube_side_1_offset)
@@ -290,6 +306,10 @@ class ActivatedReferenceFace(ReferenceFace):
 
         cutted_face = ref_face2.cut(comp_solid)
         quad_meshes = [Face(fc_face=x).create_hex_g_mesh(lc=9999999999) for x in cutted_face.SubShapes]
+
+        free_blocks = create_blocks_from_2d_mesh(quad_meshes, self)
+
+        Block.save_fcstd('/tmp/blocks2.FCStd')
 
         [x.write(f'/tmp/quad_mesh{i}.vtk') for i, x in enumerate(quad_meshes)]
 
