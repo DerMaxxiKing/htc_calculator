@@ -4,6 +4,7 @@ import itertools
 import numpy as np
 from functools import lru_cache, wraps
 from ..logger import logger
+from ..tools import vector_to_np_array, perpendicular_vector
 
 import FreeCAD
 import Part as FCPart
@@ -47,7 +48,7 @@ class VertexMetaMock(type):
         return vert
 
     def __call__(cls, *args, **kwargs):
-        position = kwargs.get('position', np.array([0, 0, 0]))
+        position = np.round(kwargs.get('position', np.array([0, 0, 0])), 3)
         obj = cls.get_vertex(position)
         if obj is None:
             obj = cls.__new__(cls, *args, **kwargs)
@@ -143,7 +144,7 @@ class BlockMetaMock(type):
     def comp_solid(self):
         if self._comp_solid is None:
             solids = []
-            [solids.extend(x.fc_colids.Solids) for x in self.instances]
+            [solids.extend(x.fc_solid.Solids) for x in self.instances]
             self._comp_solid = FCPart.CompSolid(solids)
         return self._comp_solid
 
@@ -373,11 +374,9 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
         if isinstance(self.extruded, list):
             # https://forum.freecadweb.org/viewtopic.php?t=21636
 
-            save_fcstd([x.fc_edge for x in self.extruded], f'/tmp/extrude_edges_face{self.id}')
-
-            ex_wire = FCPart.Wire([x.fc_edge for x in self.extruded])
-
-            save_fcstd([ex_wire], f'/tmp/extrude_wire{self.id}')
+            # save_fcstd([x.fc_edge for x in self.extruded], f'/tmp/extrude_edges_face{self.id}')
+            # ex_wire = FCPart.Wire([x.fc_edge for x in self.extruded])
+            # save_fcstd([ex_wire], f'/tmp/extrude_wire{self.id}')
 
             doc = App.newDocument()
             sweep = doc.addObject('Part::Sweep', 'Sweep')
@@ -429,7 +428,13 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
         else:
             edges = [x.fc_edge for x in self.edges]
             face_wire = FCPart.Wire(edges)
-            face = make_complex_face_from_edges(face_wire.OrderedEdges)
+
+            try:
+                face = FCPart.Face(face_wire)
+            except:
+                face = FCPart.makeFilledFace(FCPart.Wire(edges).OrderedEdges)
+
+            # face = make_complex_face_from_edges(face_wire.OrderedEdges)
 
         if face.Area < 1e-3:
             logger.warning(f'Face {self.id} area very small: {face.Area}')
@@ -836,14 +841,6 @@ def get_position(vertex: FCPart.Vertex):
     return np.array([vertex.X, vertex.Y, vertex.Z])
 
 
-def vector_to_np_array(vector):
-    return np.array([vector.x, vector.y, vector.z])
-
-
-def perpendicular_vector(x, y):
-    return np.cross(x, y)
-
-
 def unit_vector(vec):
     return vec / np.linalg.norm(vec)
 
@@ -864,6 +861,9 @@ def create_o_grid_blocks(edge,
     :param outlet: second layer pipe block face is outlet
     :return: generated blocks
     """
+    start_point = get_position(edge.Vertexes[0])
+    end_point = get_position(edge.Vertexes[1])
+    dist = reference_face.tube_diameter / 4
     face_normal = vector_to_np_array(reference_face.normal)
     direction = vector_to_np_array(edge.tangentAt(edge.FirstParameter))
     perp_vec = perpendicular_vector(face_normal, direction)
@@ -871,21 +871,13 @@ def create_o_grid_blocks(edge,
     perp_vec2 = perpendicular_vector(face_normal, direction2)
 
     if type(edge.Curve) is FCPart.Line:
-        direction = vector_to_np_array(edge.Curve.Direction)
 
         # create vertices
-        # -------------------------------------------------------------------------------------------------------------
-        # center block
-        start_point = get_position(edge.Vertexes[0])
-        end_point = get_position(edge.Vertexes[1])
-        dist = reference_face.tube_diameter/4
-
         layer1_vertices = create_layer_vertices(start_point, face_normal, perp_vec, dist, outer_pipe=outer_pipe)
         layer2_vertices = [x + (end_point - start_point) for x in layer1_vertices]
 
         # create edges
         # -------------------------------------------------------------------------------------------------------------
-        i = 0
         layer1_edges = create_layer_edges(layer1_vertices,
                                           start_point,
                                           face_normal,
@@ -900,43 +892,12 @@ def create_o_grid_blocks(edge,
                                           perp_vec2,
                                           outer_pipe=outer_pipe)
 
-        # create blocks:
-        # -------------------------------------------------------------------------------------------------------------
-        blocks = create_blocks(layer1_vertices,
-                               layer2_vertices,
-                               layer1_edges,
-                               layer2_edges,
-                               face_normal,
-                               [n_cell, n_cell, int(np.ceil(edge.Length / 50))],
-                               edge,
-                               outer_pipe=outer_pipe)
-
     else:
-        start_point = get_position(edge.Vertexes[0])
-        end_point = get_position(edge.Vertexes[1])
         center = np.array(edge.Curve.Center)
-        # perp_vec = perpendicular_vector(face_normal, direction)
-        dist = reference_face.tube_diameter / 4
-
-        # dir1 = edge.tangentAt(edge.FirstParameter)
-        # dir2 = edge.tangentAt(edge.LastParameter)
-        # ctr = FCPart.calcCentroid(dir1, dir2)
-        #
-        # dv = dir2.sub(dir1)
-        # rot_placement = FreeCAD.Placement(edge.Curve.Center,
-        #                                   FreeCAD.Rotation(FreeCAD.Vector(face_normal[0],
-        #                                                                   face_normal[1],
-        #                                                                   face_normal[2]),
-        #                                                    dv)
-        #                                   )
-
-        # rot_angle = angle_between_vertices(edge.Curve.Center,
-        #                                    get_position(edge.Vertexes[0]),
-        #                                    get_position(edge.Vertexes[1]))
 
         rot_angle = np.rad2deg(DraftVecUtils.angle(Base.Vector(start_point - center),
-                                        Base.Vector(end_point - center),
-                                        Base.Vector(face_normal)))
+                                                   Base.Vector(end_point - center),
+                                                   Base.Vector(face_normal)))
 
         layer1_vertices = create_layer_vertices(start_point, face_normal, perp_vec, dist, outer_pipe=outer_pipe)
 
@@ -945,10 +906,6 @@ def create_o_grid_blocks(edge,
                              Base.Vector(layer1_vertices[i+1].position)) for i in range(layer1_vertices.__len__() - 1)]
         )
 
-        # vertex_wire.Placement = rot_placement
-        # layer2_vertices = [BlockMeshVertex(position=np.array(x.Point)) for x in vertex_wire.Vertexes]
-
-        # [x.Point for x in vertex_wire.rotate(edge.Curve.Center, reference_face.normal,  rot_angle).Vertexes]
         layer2_vertices = [BlockMeshVertex(position=np.array(x.Point)) for x in vertex_wire.rotate(edge.Curve.Center,
                                                                                                    reference_face.normal,
                                                                                                    rot_angle).Vertexes]
@@ -964,16 +921,19 @@ def create_o_grid_blocks(edge,
                                           end_point,
                                           face_normal,
                                           reference_face,
-                                          perp_vec2)
+                                          perp_vec2,
+                                          outer_pipe=outer_pipe)
 
-        blocks = create_blocks(layer1_vertices,
-                               layer2_vertices,
-                               layer1_edges,
-                               layer2_edges,
-                               face_normal,
-                               [n_cell, n_cell, int(np.ceil(edge.Length / 50))],
-                               edge,
-                               outer_pipe=outer_pipe)
+    # create blocks:
+    # -------------------------------------------------------------------------------------------------------------
+    blocks = create_blocks(layer1_vertices,
+                           layer2_vertices,
+                           layer1_edges,
+                           layer2_edges,
+                           face_normal,
+                           [n_cell, n_cell, int(np.ceil(edge.Length / 50))],
+                           edge,
+                           outer_pipe=outer_pipe)
 
     if inlet:
         for i in [0, 1, 2, 3]:
@@ -1029,8 +989,6 @@ def create_layer_vertices(start_point, face_normal, perp_vec, dist, outer_pipe=T
 
 
 def create_layer_edges(layer_vertices, center_point, face_normal, reference_face, perp_vec, outer_pipe=True):
-
-
 
     e0 = BlockMeshEdge(vertices=[layer_vertices[0], layer_vertices[1]], type='line')
     e1 = BlockMeshEdge(vertices=[layer_vertices[1], layer_vertices[2]], type='line')
@@ -1167,81 +1125,13 @@ def create_blocks(layer1_vertices,
                           num_cells=num_cells,
                           cell_zone=cell_zones[i],
                           extruded=True)
-        # try:
-        #     print(f'Block {new_block.id} volume: {new_block.fc_box.Volume}')
-        # except Exception as e:
-        #     logger.error(f'Block error')
-        #     # raise e
+
         blocks.append(new_block)
 
     blocks[1].faces[5].boundary = wall_patch
     blocks[2].faces[3].boundary = wall_patch
     blocks[3].faces[4].boundary = wall_patch
     blocks[4].faces[2].boundary = wall_patch
-
-    # index = [0, 1, 2, 3]
-    # vertices = [*[layer1_vertices[x] for x in index], *[layer2_vertices[x] for x in index]]
-    # edge_index = [0, 1, 2, 3]
-    # connect_edges = create_edges_between_layers(vertices[0:4], vertices[4:], edge)
-    # block_edges = [*[layer1_edges[x] for x in edge_index], *[layer2_edges[x] for x in edge_index], *connect_edges]
-    # b0 = Block(name=f'Center Block edge {edge}',
-    #            vertices=vertices,
-    #            edge=edge,
-    #            block_edges=block_edges,
-    #            num_cells=num_cells,
-    #            cell_zone='pipe')
-    #
-    # index = [0, 4, 5, 1]
-    # vertices = [*[layer1_vertices[x] for x in index], *[layer2_vertices[x] for x in index]]
-    # edge_index = [4, 8, 5, 0]
-    # block_edges = [*[layer1_edges[x] for x in edge_index],
-    #                *[layer2_edges[x] for x in edge_index],
-    #                *create_edges_between_layers(vertices[0:4], vertices[4:], edge)]
-    # b1 = Block(name=f'Pipe Block 1, edge {edge}',
-    #            vertices=vertices,
-    #            edge=edge,
-    #            block_edges=block_edges,
-    #            num_cells=num_cells,
-    #            cell_zone='pipe')
-    # b1.faces[5].boundary = wall_patch
-
-    # index = [1, 5, 6, 2]
-    # vertices = [*[layer1_vertices[x] for x in index], *[layer2_vertices[x] for x in index]]
-    # edge_index = [5, 9, 6, 1]
-    # block_edges = [*[layer1_edges[x] for x in edge_index],
-    #                *[layer2_edges[x] for x in edge_index],
-    #                *create_edges_between_layers(vertices[0:4], vertices[4:], edge)]
-    # b2 = Block(name=f'Pipe Block 2, edge {edge}',
-    #            vertices=vertices,
-    #            edge=edge,
-    #            block_edges=block_edges,
-    #            num_cells=num_cells,
-    #            cell_zone='pipe')
-    # b2.faces[3].boundary = wall_patch
-
-    # index = [2, 6, 7, 3]
-    # vertices = [*[layer1_vertices[x] for x in index], *[layer2_vertices[x] for x in index]]
-    # edge_index = [6, 10, 7, 2]
-    # block_edges = [*[layer1_edges[x] for x in edge_index], *[layer2_edges[x] for x in edge_index]]
-    # b3 = Block(name=f'Pipe Block 3, edge {edge}',
-    #            vertices=vertices,
-    #            edge=edge,
-    #            block_edges=block_edges,
-    #            num_cells=num_cells,
-    #            cell_zone='pipe')
-    # b3.faces[4].boundary = wall_patch
-
-    # index = [3, 7, 4, 0]
-    # vertices = [*[layer1_vertices[x] for x in index], *[layer2_vertices[x] for x in index]]
-    # edge_index = [7, 11, 4, 3]
-    # block_edges = [*[layer1_edges[x] for x in edge_index], *[layer2_edges[x] for x in edge_index]]
-    # b4 = Block(name=f'Pipe Block 4, edge {edge}',
-    #            vertices=vertices,
-    #            edge=edge,
-    #            block_edges=block_edges,
-    #            num_cells=num_cells,
-    #            cell_zone='pipe')
-    # b4.faces[2].boundary = wall_patch
 
     if outer_pipe:
 
@@ -1542,7 +1432,8 @@ def create_blocks_from_2d_mesh(meshes, reference_face):
             v_2 = np.array([x + 2 * trans_base_vec for x in v_1])
             new_block = Block(vertices=[*v_1, *v_2],
                               name=f'Free Block',
-                              auto_cell_size=True)
+                              auto_cell_size=True,
+                              extruded=False)
             blocks.append(new_block)
 
     return blocks
@@ -1566,7 +1457,7 @@ def make_complex_face_from_edges(edges):
     # https://forum.freecadweb.org/viewtopic.php?t=21636
 
     edge_types = [type(x.Curve) for x in edges]
-    all_lines = all([x is FCPart.Line for x in edge_types])
+    # all_lines = all([x is FCPart.Line for x in edge_types])
 
     try:
         w0 = FCPart.Wire(edges)

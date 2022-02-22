@@ -304,7 +304,7 @@ class ActivatedReferenceFace(ReferenceFace):
         ref_face2 = FCPart.Face(splitted_wire).translate(mv_vec)
         export_objects(ref_face2.Edges, '/tmp/edges.FCStd')
 
-        cutted_face = ref_face2.cut(comp_solid)
+        cutted_face = ref_face2.cut(Block.comp_solid)
         quad_meshes = [Face(fc_face=x).create_hex_g_mesh(lc=9999999999) for x in cutted_face.SubShapes]
 
         free_blocks = create_blocks_from_2d_mesh(quad_meshes, self)

@@ -12,6 +12,7 @@ from scipy.spatial import ConvexHull
 
 from .meshing.surface_mesh_parameters import default_surface_mesh_parameter
 from .face import Face
+from .tools import export_objects, add_radius_to_edges, vector_to_np_array, perpendicular_vector, extrude, create_pipe
 
 from .logger import logger
 
@@ -21,6 +22,7 @@ import BOPTools.SplitAPI
 from FreeCAD import Base
 from Draft import make_fillet
 from Arch import makePipe
+import Arch
 
 
 App = FreeCAD
@@ -402,7 +404,8 @@ class PipeSolid(Solid):
         reference_face = self.reference_face.reference_face
 
         self.reference_edge = reference_face.Edges[self.reference_edge_id]
-        normal = self.reference_face.get_normal(Base.Vector(self.reference_edge.Vertexes[0].X, self.reference_edge.Vertexes[0].Y,
+        normal = self.reference_face.get_normal(Base.Vector(self.reference_edge.Vertexes[0].X,
+                                                            self.reference_edge.Vertexes[0].Y,
                                                             self.reference_edge.Vertexes[0].Z))
         tube_main_dir = self.reference_edge.Curve.Direction.cross(normal)
 
@@ -414,18 +417,28 @@ class PipeSolid(Solid):
             try:
                 wire = reference_face.OuterWire.makeOffset2D(offset, join=1, openResult=False, intersection=False)
 
-                # check if another
+                # check if another is possible (return wire)
                 try:
                     reference_face.OuterWire.makeOffset2D(offset - self.tube_distance, join=1, openResult=False,
                                                           intersection=False)
                     wires.append(wire)
                     offset = offset - 2 * self.tube_distance
                 except Exception as e:
-                    print(e)
+                    logger.debug(f'no further wire generation possible{e}')
                     offset_possible = False
             except Exception as e:
-                print(e)
+                logger.debug(f'no further wire generation possible{e}')
                 offset_possible = False
+
+        # check if last circle is possible:
+        try:
+            last_wire = reference_face.OuterWire.makeOffset2D(offset, join=1, openResult=False, intersection=False)
+        except Exception as e:
+            last_wire = None
+            logger.debug(f'no further wire generation possible{e}')
+
+
+        # export_objects([*wires, last_wire], '/tmp/initial_wires2.FCStd')
 
         pipe_edges = []
 
@@ -454,7 +467,9 @@ class PipeSolid(Solid):
         v2 = p2 - 2 * (p2 - p1).normalize() * self.tube_distance
         pipe_edges.append(FCPart.LineSegment(v1, v2).toShape())
 
+        # export_objects(pipe_edges, '/tmp/pipe_edges5.FCStd')
         # export_wire([self.reference_face.OuterWire, *pipe_edges])
+        # export_objects(wires, '/tmp/wires.FCStd')
 
         i = 1
         while i <= (wires.__len__() - 1):
@@ -494,12 +509,53 @@ class PipeSolid(Solid):
 
             i = i + 1
 
+        # export_objects(pipe_edges, '/tmp/all_edges_io4.FCStd')
+        # export_objects(all_edges, '/tmp/all_edges_io2.FCStd')
+        # export_objects([wire_in, wire_out], '/tmp/wires2.FCStd')
+
         # create
         succeeded = False
         while not succeeded:
             wire_in = FCPart.Wire(pipe_edges)
             wire_out = wire_in.makeOffset2D(-self.tube_distance, join=1, openResult=True, intersection=False)
             wire_in.distToShape(wire_out)
+
+            if last_wire is not None:
+                wire_in_edges = pipe_edges
+
+                dir1 = (last_wire.Edges[start_edge_id].Vertex1.Point - pipe_edges[-1].Vertex2.Point).normalize()
+                dir2 = (last_wire.Edges[start_edge_id].Vertexes[1].Point - pipe_edges[-1].Vertex2.Point).normalize()
+
+                if sum(abs(abs(dir1) - abs(dir2))) < 1e-10:
+                    wire_in_edges.append(FCPart.LineSegment(wire_in_edges[-1].Vertex2.Point,
+                                                            last_wire.Edges[start_edge_id].Vertexes[1].Point).toShape())
+                else:
+                    projected_point = FreeCAD.Base.Vector(
+                        project_point_on_line(point=last_wire.Edges[start_edge_id].Vertex1.Point, line=wire_in_edges[-1]))
+
+                    # change_previous end edge:
+                    wire_in_edges[-1] = FCPart.LineSegment(wire_in_edges[-1].Vertex1.Point, projected_point).toShape()
+
+                    wire_in_edges.append(FCPart.LineSegment(last_wire.Edges[start_edge_id].Vertex1.Point,
+                                                         projected_point).toShape())
+                    wire_in_edges.append(wires[i].Edges[start_edge_id])
+
+                last_wire_edges = last_wire.Edges
+                start_edge = last_wire.Edges[start_edge_id - 1]
+                # del last_wire_edges[start_edge_id - 1]
+                # del last_wire_edges[start_edge_id - 1]
+                last_wire_edges.append(start_edge.split(start_edge.LastParameter - self.tube_distance).SubShapes[0])
+                # wire_in_edges.extend(last_wire_edges)
+                wire_in_edges.extend(last_wire_edges.Edges[self.reference_edge_id + 1:])
+                wire_in_edges.extend(last_wire_edges.Edges[0:self.reference_edge_id:])
+                wire_in = FCPart.Wire(wire_in_edges)
+
+                # cut last wire out edge:
+                wire_out_edges = wire_out.Edges
+                wire_out_edges[-1] = wire_out_edges[-1].split(wire_out_edges[-1].LastParameter -
+                                                              self.tube_distance).SubShapes[0]
+
+                wire_out = FCPart.Wire(wire_out_edges)
 
             # create connection between wire_in and wire_out:
             v1 = wire_in.Edges[-1].Vertex2.Point
@@ -519,45 +575,89 @@ class PipeSolid(Solid):
                 del pipe_edges[-1]
 
         if self.bending_radius is not None:
-            edges_with_radius = all_edges[0:1]
+            all_edges = add_radius_to_edges(all_edges, self.bending_radius)
 
-            for i in range(1, all_edges.__len__()):
-                if self.bending_radius > min([edges_with_radius[-1].Length * 0.5, all_edges[i].Length * 0.5]):
-                    bending_radius = min([edges_with_radius[-1].Length * 0.5, all_edges[i].Length * 0.5])
-                else:
-                    bending_radius = self.bending_radius
-
-                new_edges = make_fillet([edges_with_radius[-1], all_edges[i]], radius=bending_radius)
-                if new_edges is not None:
-                    edges_with_radius[-1] = new_edges.Shape.OrderedEdges[0]
-                    edges_with_radius.extend(new_edges.Shape.OrderedEdges[1:])
-                else:
-                    edges_with_radius.append(all_edges[i])
-
-            pipe_wire = FCPart.Wire(edges_with_radius)
-        else:
-            pipe_wire = FCPart.Wire(all_edges)
+        pipe_wire = FCPart.Wire(all_edges)
 
         pipe_wire.Placement.move(
             self.reference_face.layer_dir * normal * (- self.reference_face.component_construction.side_1_offset + self.reference_face.tube_side_1_offset))
 
-        return pipe_wire
+        pipe_wire.Edges[0].reverse()
+
+        return FCPart.Wire(pipe_wire.OrderedEdges)
 
     def generate_solid(self):
 
         logger.info(f'Creating solid for pipe {self.name} {self.id}')
 
-        doc = App.newDocument()
-        __o__ = doc.addObject("Part::Feature", f'pipe_wire')
-        __o__.Shape = self.pipe_wire
-        initial_pipe = makePipe(__o__, self.tube_diameter)
-        doc.recompute()
-        # self.pipe = pipe.Shape
+        # doc = App.newDocument()
+        # __o__ = doc.addObject("Part::Feature", f'pipe_wire')
+        # __o__.Shape = self.pipe_wire
+        # initial_pipe = makePipe(__o__, self.tube_diameter)
+        # doc.recompute()
+        #
+        # export_objects(self.pipe_wire.Edges, '/tmp/pipe_wire_edges.FCStd')
+
+        pipe_shape = create_pipe(self.pipe_wire.Edges, self.tube_diameter, self.reference_face.normal)
+
+        # # # create inlet:
+        # # start_edge = self.pipe_wire.Edges[0]
+        # # direction = vector_to_np_array(start_edge.tangentAt(start_edge.FirstParameter))
+        # # direction2 = vector_to_np_array(start_edge.tangentAt(self.pipe_wire.Edges[-1].LastParameter))
+        # # perp_vec = perpendicular_vector(self.reference_face.normal, direction)
+        # # # c1 = FCPart.Edge(FCPart.Arc(self.pipe_wire.Edges[0].Vertex1.Point + Base.Vector(perp_vec) * self.tube_diameter / 2,
+        # # #                             self.pipe_wire.Edges[0].Vertex1.Point - self.reference_face.normal * self.tube_diameter / 2,
+        # # #                             self.pipe_wire.Edges[0].Vertex1.Point - Base.Vector(perp_vec) * self.tube_diameter / 2))
+        # # #
+        # # # c2 = FCPart.Edge(FCPart.Arc(self.pipe_wire.Edges[0].Vertex1.Point + Base.Vector(perp_vec) * self.tube_diameter / 2,
+        # # #                             self.pipe_wire.Edges[0].Vertex1.Point + self.reference_face.normal * self.tube_diameter / 2,
+        # # #                             self.pipe_wire.Edges[0].Vertex1.Point - Base.Vector(perp_vec) * self.tube_diameter / 2))
+        # # c1 = FCPart.makeCircle(self.tube_diameter / 2, self.pipe_wire.Edges[0].Vertex1.Point, Base.Vector(direction))
+        # # pipe_profile1 = FCPart.Wire([c1])
+        # # inlet = FCPart.Face(pipe_profile1)
+        # #
+        # # # create outlet
+        # # # c2 = FCPart.Edge(
+        # # #     FCPart.Arc(self.pipe_wire.Edges[-1].Vertex1.Point - Base.Vector(perp_vec) * self.tube_diameter / 2,
+        # # #                self.pipe_wire.Edges[-1].Vertex1.Point + self.reference_face.normal * self.tube_diameter / 2,
+        # # #                self.pipe_wire.Edges[-1].Vertex1.Point + Base.Vector(perp_vec) * self.tube_diameter / 2))
+        # # c2 = FCPart.makeCircle(self.tube_diameter / 2, self.pipe_wire.Edges[-1].Vertex1.Point, Base.Vector(direction2))
+        # # pipe_profile2 = FCPart.Wire([c2])
+        # # outlet = FCPart.Face(pipe_profile2)
+        # #
+        # #
+        # #
+        # # export_objects(self.pipe_wire.Edges, '/tmp/spine_edges.FCStd')
+        # # export_objects([pipe_profile1, pipe_profile2, self.pipe_wire], '/tmp/sweep.FCStd')
+        # #
+        # # self.pipe_wire.fix(1e-3, 1e-3, 1e-3)
+        # # pipe_shape = extrude(self.pipe_wire, [pipe_profile1, pipe_profile2])
+        # # # pipe_shape.fix(1e-3, 1e-3, 1e-3)
+        # # # pipe_shape.sewShape()
+        #
+        # shell = FCPart.makeShell([*pipe_shape.Faces, inlet, outlet])
+        # shell.sewShape()
+        # shell.fix(1, 1, 1)
+        # solid = FCPart.Solid(shell)
+        #
+        # export_objects(pipe_shape, '/tmp/pipe_shape.FCStd')
+        # export_objects(pipe_shape.Faces, '/tmp/pipe_shape_faces.FCStd')
+        # export_objects([shell], '/tmp/shell.FCStd')
+        # export_objects([solid], '/tmp/pipe_solid.FCStd')
+        #
+        # # self.pipe = pipe.Shape
+        #
+        # hull = self.reference_face.plain_reference_face_solid.assembly.hull
+        # # export_objects([hull.fc_solid.Shape], 'hull_solid_test.stp')
+        # # export_objects([x.fc_solid.Shape for x in self.assembly.solids], 'assembly_solid_test.stp')
+        # inlet_outlet = hull.fc_solid.Shape.Shells[0].common(initial_pipe.Shape)
+        #
+        # export_objects([initial_pipe.Shape], '/tmp/pipe.FCStd')
+        # export_objects([self.pipe_wire], '/tmp/pipe_wire.FCStd')
+        # export_objects(self.pipe_wire.Edges, '/tmp/pipe_wire_edges.FCStd')
 
         hull = self.reference_face.plain_reference_face_solid.assembly.hull
-        # export_objects([hull.fc_solid.Shape], 'hull_solid_test.stp')
-        # export_objects([x.fc_solid.Shape for x in self.assembly.solids], 'assembly_solid_test.stp')
-        inlet_outlet = hull.fc_solid.Shape.Shells[0].common(initial_pipe.Shape)
+        inlet_outlet = hull.fc_solid.Shape.Shells[0].common(pipe_shape)
 
         if inlet_outlet.SubShapes.__len__() == 2:
             inlet = Face(fc_face=inlet_outlet.SubShapes[0].removeSplitter(),
@@ -569,7 +669,7 @@ class PipeSolid(Solid):
 
         # BOPTools.SplitAPI.booleanFragments([self.pipe.fc_solid.Shape, inlet.fc_face, outlet.fc_face], "Split", tolerance=1e-5)
 
-        pipe_faces = BOPTools.SplitAPI.slice(initial_pipe.Shape.Shells[0], hull.fc_solid.Shape.Shells, "Split",
+        pipe_faces = BOPTools.SplitAPI.slice(pipe_shape.Shells[0], hull.fc_solid.Shape.Shells, "Split",
                                              1e-3)
 
         faces = [*inlet.fc_face.Faces, *outlet.fc_face.Faces, *pipe_faces.Faces]

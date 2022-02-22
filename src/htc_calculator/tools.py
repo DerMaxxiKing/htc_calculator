@@ -15,6 +15,8 @@ from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
 from OCC.Core.gp import gp_Pnt, gp_Ax2, gp_Dir, gp_XYZ
 from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
 
+from Draft import make_fillet
+
 App = FreeCAD
 
 
@@ -265,3 +267,108 @@ def extract_to_meshio():
     # make meshio mesh
     return meshio.Mesh(points, cells, cell_sets=cell_sets)
 # axis coming soon
+
+
+def vector_to_np_array(vector):
+    return np.array([vector.x, vector.y, vector.z])
+
+
+def perpendicular_vector(x, y):
+    return np.cross(x, y)
+
+
+def extrude(path, sections: list, additional_paths=None, occ=True):
+
+    if occ:
+        ps = FCPart.BRepOffsetAPI.MakePipeShell(path)
+        ps.setFrenetMode(False)
+        ps.setSpineSupport(path)
+        # ps.setAuxiliarySpine(FCPart.Wire(self.extruded[3].fc_edge), True, False)
+        for section in sections:
+            ps.add(section, True, True)
+            ps.add(section, True, True)
+        if ps.isReady():
+            ps.build()
+        return ps.shape()
+    else:
+        doc = App.newDocument()
+        sweep = doc.addObject('Part::Sweep', 'Sweep')
+
+        sweep_sections = []
+        for i, section in enumerate(sections):
+            sec = doc.addObject("Part::Feature", f'section{i}')
+            sec.Shape = section
+            sweep_sections.append(sec)
+
+        spine = doc.addObject("Part::Feature", f'spine')
+        spine.Shape = path
+
+        sweep.Sections = sweep_sections
+        sweep.Spine = spine
+        sweep.Solid = False
+        sweep.Frenet = True
+
+        doc.recompute()
+
+        return sweep.Shape
+
+
+def create_pipe(edges, tube_diameter, face_normal):
+
+    faces = []
+    for i, edge in enumerate(edges):
+        c1 = FCPart.makeCircle(tube_diameter / 2, edge.Vertex1.Point, edge.tangentAt(edge.FirstParameter))
+        c2 = FCPart.makeCircle(tube_diameter / 2, edge.Vertex2.Point, edge.tangentAt(edge.LastParameter))
+        pipe_profile1 = FCPart.Wire([c1])
+        pipe_profile2 = FCPart.Wire([c2])
+        if i == 0:
+            inlet = FCPart.Face(pipe_profile1)
+        if i == edges.__len__() - 1:
+            outlet = FCPart.Face(pipe_profile1)
+
+        new_faces = extrude(FCPart.Wire([edge]), [pipe_profile1, pipe_profile2], occ=False)
+        faces.extend(new_faces.Faces)
+        # export_objects([pipe_profile1, pipe_profile2, edge, new_faces], '/tmp/test3.FCStd')
+    # export_objects([*faces, inlet, outlet], '/tmp/test3.FCStd')
+
+    shell = FCPart.makeShell([*faces, inlet, outlet])
+    shell.sewShape()
+    shell.fix(1, 1, 1)
+    solid = FCPart.Solid(shell)
+
+    export_objects([solid], '/tmp/solid_test.FCStd')
+
+    return solid
+
+
+def add_radius_to_edges(edges, radius):
+
+    edges_with_radius = edges[0:1]
+
+    i = 0
+    while i < edges.__len__():
+
+        dir1 = vector_to_np_array(edges_with_radius[-1].tangentAt(edges_with_radius[-1].LastParameter))
+        dir2 = vector_to_np_array(edges[i].tangentAt(edges[i].LastParameter))
+
+        if np.allclose(dir1, dir2, 1e-5) or np.allclose(dir1, -dir2, 1e-5):
+            edges_with_radius.append(edges[i])
+            i += 1
+            continue
+        try:
+            new_edges = make_fillet([edges_with_radius[-1], edges[i]], radius=radius)
+            if new_edges is not None:
+                edges_with_radius[-1] = new_edges.Shape.OrderedEdges[0]
+                edges_with_radius.extend(new_edges.Shape.OrderedEdges[1:])
+            else:
+                edges_with_radius.append(edges[i])
+
+        except Exception as e:
+            print(e)
+
+        i += 1
+
+    # export_objects(edges, '/tmp/edges1.FCStd')
+    # export_objects(edges_with_radius, '/tmp/edges_with_radius.FCStd')
+
+    return edges_with_radius
