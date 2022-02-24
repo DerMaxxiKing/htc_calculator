@@ -302,7 +302,7 @@ class ActivatedReferenceFace(ReferenceFace):
 
         splitted_wire = FCPart.Wire(edges)
         ref_face2 = FCPart.Face(splitted_wire).translate(mv_vec)
-        export_objects(ref_face2.Edges, '/tmp/edges.FCStd')
+        # export_objects(ref_face2.Edges, '/tmp/edges.FCStd')
 
         cutted_face = ref_face2.cut(Block.comp_solid)
         quad_meshes = [Face(fc_face=x).create_hex_g_mesh(lc=9999999999) for x in cutted_face.SubShapes]
@@ -313,7 +313,7 @@ class ActivatedReferenceFace(ReferenceFace):
 
         [x.write(f'/tmp/quad_mesh{i}.vtk') for i, x in enumerate(quad_meshes)]
 
-        export_objects([ref_face2, cutted_face, comp_solid], '/tmp/cutted_face.FCStd')
+        export_objects([ref_face2, cutted_face], '/tmp/cutted_face.FCStd')
 
         print('done')
 

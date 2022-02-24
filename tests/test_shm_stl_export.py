@@ -5,12 +5,17 @@ from src.htc_calculator.construction import Material, Layer, ComponentConstructi
 from src.htc_calculator.meshing.mesh_setup import MeshSetup
 
 
+# vertices = np.array([[0, 0, 0],
+#                      [5000, 0, 0],
+#                      [5000, 5000, 0],
+#                      [2500, 5000, 0],
+#                      [2500, 2500, 0],
+#                      [0, 2500, 0]])
+
 vertices = np.array([[0, 0, 0],
                      [5000, 0, 0],
                      [5000, 5000, 0],
-                     [2500, 5000, 0],
-                     [2500, 2500, 0],
-                     [0, 2500, 0]])
+                     [0, 5000, 0]])
 
 tube_material = Material(name='Tube Material',
                          density=1800,
@@ -66,7 +71,7 @@ tabs1 = ActivatedReferenceFace(vertices=vertices,
                                tube_diameter=15,
                                tube_inner_diameter=10,
                                tube_material=tube_material,
-                               tube_distance=250,
+                               tube_distance=225,
                                tube_edge_distance=300,
                                bending_radius=100,
                                tube_side_1_offset=100,

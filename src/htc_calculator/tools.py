@@ -1,21 +1,25 @@
 import os
-import sys
 import numpy as np
 import pathlib
 import gmsh
 import meshio
+import itertools
+
+from .logger import logger
 
 import FreeCAD
 import Part as FCPart
 import Points
-import numpy as np
+from Draft import make_fillet
+from FreeCAD import Base
+import BOPTools.SplitFeatures
+
 from OCC.Core.Bnd import Bnd_OBB
 from OCC.Core.BRepBndLib import brepbndlib_AddOBB
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
 from OCC.Core.gp import gp_Pnt, gp_Ax2, gp_Dir, gp_XYZ
 from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
 
-from Draft import make_fillet
 
 App = FreeCAD
 
@@ -98,15 +102,68 @@ def project_point_on_line(point, line):
     return projection
 
 
-def export_objects(objects, filename):
+def angle_between_vertices(p1, p2, p3, deg=True):
+    """
+    Calculate the angle between three vertices
+
+        p1  * ------------ * p2
+            |           |
+            |    ALPHA  |
+            | ----------|
+            |
+        p3  *
+
+
+    :param p1:  coordinates vertex 1 (center)
+    :param p2:  coordinates vertex 2
+    :param p3:  coordinates vertex 3
+    """
+
+    if isinstance(p1, Base.Vector):
+        p1 = np.array(p1)
+
+    if isinstance(p2, Base.Vector):
+        p2 = np.array(p2)
+
+    if isinstance(p3, Base.Vector):
+        p3 = np.array(p3)
+
+    v1 = p2 - p1
+    v2 = p3 - p1
+
+    u_v1 = v1 / np.linalg.norm(v1)
+    u_v2 = v2 / np.linalg.norm(v2)
+
+    angle = np.arccos(np.dot(u_v1, u_v2))
+
+    if deg:
+        return np.rad2deg(angle)
+    else:
+        return angle
+
+
+export_iter = itertools.count()
+
+
+def export_objects(objects, filename, add_suffix=True):
+
+    if not isinstance(objects, list):
+        objects = [objects]
+
     file_suffix = pathlib.Path(filename).suffix
 
     doc = App.newDocument()
 
     for i, object in enumerate(objects):
-        __o__ = doc.addObject("Part::Feature", f'edge{i}')
-        __o__.Label = f'edge{i}'
+
+        __o__ = doc.addObject("Part::Feature", f'{type(object).__name__}{i}')
+        __o__.Label = f'{type(object).__name__}{i}'
         __o__.Shape = object
+
+    if add_suffix:
+        id = next(export_iter)
+        p = pathlib.Path(filename)
+        filename = "{0}_{2}{1}".format(pathlib.Path.joinpath(p.parent, p.stem), p.suffix, id)
 
     if file_suffix == '.FCStd':
         doc.recompute()
@@ -277,7 +334,7 @@ def perpendicular_vector(x, y):
     return np.cross(x, y)
 
 
-def extrude(path, sections: list, additional_paths=None, occ=True):
+def extrude(path, sections: list, additional_paths=None, occ=False):
 
     if occ:
         ps = FCPart.BRepOffsetAPI.MakePipeShell(path)
@@ -315,6 +372,8 @@ def extrude(path, sections: list, additional_paths=None, occ=True):
 
 def create_pipe(edges, tube_diameter, face_normal):
 
+    inlet = None
+    outlet = None
     faces = []
     for i, edge in enumerate(edges):
         c1 = FCPart.makeCircle(tube_diameter / 2, edge.Vertex1.Point, edge.tangentAt(edge.FirstParameter))
@@ -333,42 +392,651 @@ def create_pipe(edges, tube_diameter, face_normal):
 
     shell = FCPart.makeShell([*faces, inlet, outlet])
     shell.sewShape()
-    shell.fix(1, 1, 1)
+    shell.fix(1e-3, 1e-3, 1e-3)
     solid = FCPart.Solid(shell)
 
-    export_objects([solid], '/tmp/solid_test.FCStd')
+    # export_objects([solid], '/tmp/solid_test.FCStd')
 
     return solid
 
 
 def add_radius_to_edges(edges, radius):
 
-    edges_with_radius = edges[0:1]
+    edges_with_radius = FCPart.Wire(edges[0:1])
 
-    i = 0
+    i = 1
     while i < edges.__len__():
 
-        dir1 = vector_to_np_array(edges_with_radius[-1].tangentAt(edges_with_radius[-1].LastParameter))
+        current_edges = edges_with_radius.OrderedEdges
+
+        if i == 22:
+            print('error')
+
+        dir1 = vector_to_np_array(current_edges[-1].tangentAt(current_edges[-1].LastParameter))
         dir2 = vector_to_np_array(edges[i].tangentAt(edges[i].LastParameter))
 
         if np.allclose(dir1, dir2, 1e-5) or np.allclose(dir1, -dir2, 1e-5):
-            edges_with_radius.append(edges[i])
+            current_edges.append(edges[i])
+            edges_with_radius = FCPart.Wire(FCPart.sortEdges(current_edges)[0])
             i += 1
             continue
         try:
-            new_edges = make_fillet([edges_with_radius[-1], edges[i]], radius=radius)
+            new_edges = make_fillet([current_edges[-1], edges[i]], radius=radius)
             if new_edges is not None:
-                edges_with_radius[-1] = new_edges.Shape.OrderedEdges[0]
-                edges_with_radius.extend(new_edges.Shape.OrderedEdges[1:])
+                current_edges[-1] = new_edges.Shape.OrderedEdges[0]
+                current_edges.extend(new_edges.Shape.OrderedEdges[1:])
             else:
-                edges_with_radius.append(edges[i])
+                current_edges.append(edges[i])
+
+            FCPart.sortEdges(current_edges)
+            edges_with_radius = FCPart.Wire(FCPart.sortEdges(current_edges)[0])
 
         except Exception as e:
             print(e)
 
         i += 1
 
-    # export_objects(edges, '/tmp/edges1.FCStd')
-    # export_objects(edges_with_radius, '/tmp/edges_with_radius.FCStd')
+    # export_objects([*current_edges, *new_edges.Shape.Edges], '/tmp/edges2.FCStd')
+    # export_objects(current_edges, '/tmp/edges8.FCStd')
+    # export_objects(edges_with_radius.OrderedEdges, '/tmp/edges_with_radius7.FCStd')
+    # export_objects(edges, '/tmp/next_edge2.FCStd')
+    # export_objects([edges_with_radius[-1], edges[i]], '/tmp/next_edge2.FCStd')
 
     return edges_with_radius
+
+
+def face_normal(fc_face):
+
+    normals = []
+    for vertex in fc_face.Vertexes:
+        u, v = fc_face.Surface.parameter(vertex.Point)
+        nv = fc_face.normalAt(u, v)
+        normals.append(vector_to_np_array(nv.normalize()))
+
+    return normals
+
+
+def edge_to_line(edge):
+    return FCPart.Line(edge.Vertex1.Point, edge.Vertex2.Point)
+
+
+def intersect_lines(edge1, edge2):
+    if not isinstance(edge1, FCPart.Line):
+        edge1 = edge_to_line(edge1)
+
+    if not isinstance(edge2, FCPart.Line):
+        edge2 = edge_to_line(edge2)
+
+    return edge1.intersect(edge2)
+
+
+def extrude_edge(edge: FCPart.Edge, side=None, dist: float = 99999999, include=True):
+
+    param1 = edge.FirstParameter
+    param2 = edge.LastParameter
+
+    if side is None:
+        return FCPart.LineSegment(edge.valueAt(param1) - edge.tangentAt(param1) * dist,
+                                  edge.valueAt(param2) + edge.tangentAt(param2) * dist).toShape()
+    else:
+        if side == 1:
+            if include:
+                return FCPart.LineSegment(edge.valueAt(param1) - edge.tangentAt(param1) * dist,
+                                          edge.valueAt(param2)).toShape()
+            else:
+                return FCPart.LineSegment(edge.valueAt(param1) - edge.tangentAt(param1) * dist,
+                                          edge.valueAt(param1)).toShape()
+        else:
+            if include:
+                return FCPart.LineSegment(edge.valueAt(param1),
+                                          edge.valueAt(param2) + edge.tangentAt(param2) * dist).toShape()
+            else:
+                return FCPart.LineSegment(edge.valueAt(param2),
+                                          edge.valueAt(param2) + edge.tangentAt(param2) * dist).toShape()
+
+
+def connect_edges(edge1, edge2, side1, side2):
+
+    e1_param = [None, edge1.FirstParameter, edge1.LastParameter]
+    e2_param = [None, edge2.FirstParameter, edge2.LastParameter]
+
+    return FCPart.LineSegment(edge1.valueAt(e1_param[side1]),
+                              edge2.valueAt(e2_param[side2])).toShape()
+
+
+def create_pipe_wire(reference_face,
+                     start_edge=0,
+                     tube_distance=225,
+                     tube_edge_distance=300,
+                     bending_radius=100,
+                     tube_diameter=20,
+                     layout='DoubleSerpentine'):
+
+    normal = face_normal(reference_face)[0]
+    start_edge = reference_face.OuterWire.Edges[start_edge]
+
+    # real_edge_distance = tube_edge_distance + bending_radius + 2.5 * tube_diameter
+
+    if layout == 'DoubleSerpentine':
+        logger.debug(f'Creating pipe with DoubleSerpentine layout')
+
+        inflow_dir = perpendicular_vector(normal,
+                                          vector_to_np_array(start_edge.tangentAt(
+                                              start_edge.LastParameter - tube_edge_distance)
+                                          ))
+
+        # # create inflow
+        # v1 = start_edge.valueAt(start_edge.LastParameter - tube_edge_distance - 0.5 * tube_diameter)
+        # inflow_dir = perpendicular_vector(normal,
+        #                                   vector_to_np_array(start_edge.tangentAt(
+        #                                       start_edge.LastParameter - tube_edge_distance)
+        #                                   ))
+        # v2 = v1 - Base.Vector(inflow_dir) * 500
+        # inflow_edge = FCPart.LineSegment(v2, v1).toShape()
+        #
+        # # create outflow
+        # v1 = start_edge.valueAt(start_edge.LastParameter - tube_edge_distance - 3 * tube_diameter)
+        # v2 = v1 - Base.Vector(inflow_dir) * 500
+        # outflow_edge = FCPart.LineSegment(v2, v1).toShape()
+
+        # create horizontal lines
+        # -----------------------------------------------------------------
+
+        # line 0
+        horizontal_lines = []
+
+        base_edge = FCPart.LineSegment(
+            start_edge.Vertex1.Point - start_edge.tangentAt(start_edge.FirstParameter) * 10000000,
+            start_edge.Vertex2.Point + start_edge.tangentAt(start_edge.LastParameter) * 1000000).toShape()
+
+        movement = Base.Vector(inflow_dir) * 0
+
+        # e_init = base_edge.copy()
+        # e_init.Placement.move(movement + 0.01)
+        # e_init2 = e_init.cut(reference_face.OuterWire).SubShapes[1]
+        # e0 = FCPart.LineSegment(e_init2.valueAt(e_init2.FirstParameter + real_edge_distance + 0.5 * tube_diameter),
+        #                         e_init2.valueAt(e_init2.LastParameter - real_edge_distance - 0.5 * tube_diameter)).toShape()
+        # horizontal_lines.append(e0)
+
+        cut_wire = reference_face.OuterWire.makeOffset2D(-tube_edge_distance,
+                                                         join=1,
+                                                         openResult=False,
+                                                         intersection=False)
+
+        jump3_wire = reference_face.OuterWire.makeOffset2D(-tube_edge_distance - 0.5 * tube_diameter,
+                                                           join=1,
+                                                           openResult=False,
+                                                           intersection=False)
+        jump3_comp = FCPart.Compound([extrude_edge(x,
+                                                   dist=tube_edge_distance + 0.5 * tube_diameter)
+                                      for x in jump3_wire.Edges])
+
+        jump1_wire = reference_face.OuterWire.makeOffset2D(-tube_edge_distance - 3 * tube_diameter,
+                                                           join=1,
+                                                           openResult=False,
+                                                           intersection=False)
+
+        jump1_comp = FCPart.Compound([extrude_edge(x,
+                                                   dist=tube_edge_distance + 3 * tube_diameter)
+                                      for x in jump1_wire.Edges])
+
+        # export_objects([cut_wire, reference_face.Wire], '/tmp/cut.FCStd')
+
+        i = 0
+        while True:
+            if i == 0:
+                movement = Base.Vector(inflow_dir) * (tube_edge_distance + 1 + 0.5 * tube_diameter)
+            else:
+                movement = movement + Base.Vector(inflow_dir) * tube_distance
+
+            e_init = base_edge.copy()
+            e_init.Placement.move(movement)
+            cut_shapes = e_init.cut(cut_wire)
+            # cut_shapes = e_init.cut(reference_face.OuterWire)
+            if cut_shapes.SubShapes.__len__() > 1:
+                e_init2 = cut_shapes.SubShapes[1]
+                e0 = FCPart.LineSegment(e_init2.valueAt(e_init2.FirstParameter + bending_radius + 3.5 * tube_diameter),
+                                        e_init2.valueAt(e_init2.LastParameter - bending_radius - 3.5 * tube_diameter)).toShape()
+                # if e0.distToShape(reference_face.OuterWire)[0] < tube_edge_distance:
+                #     break
+                horizontal_lines.append(e0)
+            else:
+                break
+
+            i += 1
+
+        if (horizontal_lines.__len__() % 2) != 0:
+            horizontal_lines = horizontal_lines[0:-1]
+
+        # export_objects([*horizontal_lines, reference_face.Wire, jump1_wire, lv1, *jump1_comp.Edges, out_edge0], '/tmp/horizontal_lines.FCStd')
+
+        ## create pipe edges:
+
+        pipe_edges_in = []
+        pipe_edges_out = []
+
+        # create outflow
+        h0_edge = horizontal_lines[0]
+        lv1 = extrude_edge(h0_edge, side=2, dist=1000)
+        lv1_cut = lv1.cut(jump1_comp)
+        out_edge0 = FCPart.LineSegment(h0_edge.Vertex2.Point,
+                                       lv1_cut.SubShapes[0].Vertex2.Point).toShape()
+        out_edge1 = FCPart.LineSegment(out_edge0.Vertex2.Point,
+                                       Base.Vector(project_point_on_line(out_edge0.Vertex2.Point, start_edge))).toShape()
+        pipe_edges_out.extend([out_edge0, out_edge1])
+
+        # create inflow
+        h1_edge = horizontal_lines[1]
+        lv1 = extrude_edge(h1_edge, side=2, dist=1000)
+        lv1_cut = lv1.cut(jump3_comp)
+        in_edge0 = FCPart.LineSegment(h1_edge.Vertex2.Point,
+                                      lv1_cut.SubShapes[0].Vertex2.Point).toShape()
+        in_edge1 = FCPart.LineSegment(in_edge0.Vertex2.Point,
+                                      out_edge0.Vertex2.Point + out_edge0.tangentAt(out_edge0.LastParameter) * 2.5 * tube_diameter).toShape()
+
+        in_edge2 = FCPart.LineSegment(in_edge1.Vertex2.Point,
+                                      Base.Vector(
+                                          project_point_on_line(in_edge1.Vertex2.Point, start_edge))).toShape()
+
+        pipe_edges_in.extend([in_edge0, in_edge1, in_edge2])
+
+        # # create inflow
+        # v1 = start_edge.valueAt(start_edge.LastParameter - tube_edge_distance - 3 * tube_diameter)
+        # v2 = v1 - Base.Vector(inflow_dir) * 500
+        # outflow_edge = FCPart.LineSegment(v2, v1).toShape()
+        #
+        # # connect horizontal lines:
+        # # ----------------------------------------------------------------------------------------
+        #
+        # export_objects([inflow_edge,
+        #                 outflow_edge,
+        #                 *horizontal_lines,
+        #                 reference_face.OuterWire,
+        #                 cut_wire, jump1_wire, jump3_wire], '/tmp/in_out_horizontal_lines.FCStd')
+        #
+        # # export_objects([inflow_edge, outflow_edge, *horizontal_lines, reference_face.OuterWire], '/tmp/in_out_horizontal_lines.FCStd')
+        #
+        # # connect to inlet / outlet
+        # # connect inlet to h_line1
+        # intersect_point = intersect_lines(inflow_edge, horizontal_lines[1])
+        # intersect_point_vec = Base.Vector(intersect_point[0].X,
+        #                                   intersect_point[0].Y,
+        #                                   intersect_point[0].Z)
+        # c1 = FCPart.LineSegment(inflow_edge.Vertex2.Point,
+        #                         intersect_point_vec).toShape()
+        # c1.cut(jump3_wire)
+        #
+        # c2 = FCPart.LineSegment(intersect_point_vec,
+        #                         horizontal_lines[1].Vertex2.Point).toShape()
+        #
+        # pipe_edges_in.extend([c1, c2, horizontal_lines[1]])
+        #
+        # # connect outlet to h_line0
+        # intersect_point = intersect_lines(outflow_edge, horizontal_lines[0])
+        # intersect_point_vec = Base.Vector(intersect_point[0].X,
+        #                                   intersect_point[0].Y,
+        #                                   intersect_point[0].Z)
+        # c1 = FCPart.LineSegment(outflow_edge.Vertex2.Point,
+        #                         intersect_point_vec).toShape()
+        # c2 = FCPart.LineSegment(intersect_point_vec,
+        #                         horizontal_lines[0].Vertex2.Point).toShape()
+        #
+        # pipe_edges_out.extend([c1, c2, horizontal_lines[0]])
+
+        # export_objects([*pipe_edges_in,
+        #                 *pipe_edges_out,
+        #                 reference_face.OuterWire,
+        #                 h0_edge,
+        #                 h1_edge], '/tmp/pipe_edges.FCStd')
+        #
+        # export_objects([FCPart.Compound(horizontal_lines),
+        #                 reference_face,
+        #                 jump1_wire,
+        #                 jump3_wire], '/tmp/pipe_edges_out.FCStd')
+
+        pipe_edges_in, end_side_in = connect_h_lines(horizontal_lines,
+                                                     bending_radius,
+                                                     tube_diameter,
+                                                     pipe_edges_in,
+                                                     cut_wire,
+                                                     normal,
+                                                     [jump1_wire, jump3_wire],
+                                                     jump=1,
+                                                     i=1,
+                                                     side=1)
+
+        pipe_edges_out, end_side_out = connect_h_lines(horizontal_lines,
+                                                       bending_radius,
+                                                       tube_diameter,
+                                                       pipe_edges_out,
+                                                       cut_wire,
+                                                       normal,
+                                                       [jump1_wire, jump3_wire],
+                                                       jump=3,
+                                                       i=0,
+                                                       side=1)
+
+        if end_side_in != end_side_out:
+            raise Exception(f'Error while connection horizontal lines. End side 1 is not equal to end side 2')
+
+        # connect pipe_edges_in and pipe_edges_out:
+        con_edge = FCPart.LineSegment(pipe_edges_in[-1].Vertexes[end_side_in-1].Point,
+                                      pipe_edges_out[-1].Vertexes[end_side_out-1].Point).toShape()
+        # join pipe_edges_in and pipe_edges_out
+        pipe_edges_out.reverse()
+
+        # export_objects([*pipe_edges_in, con_edge, *pipe_edges_out], '/tmp/pipe_wire.FCStd')
+
+        pipe_wire = FCPart.Wire(FCPart.sortEdges([*pipe_edges_in,
+                                                  con_edge,
+                                                  *pipe_edges_out])[0]
+                                )
+        # export_objects([FCPart.Compound(x) for x in FCPart.sortEdges([*pipe_edges_in, con_edge, *pipe_edges_out])], '/tmp/pipe_wire2.FCStd')
+        # export_objects([FCPart.Compound(pipe_edges_in), FCPart.Compound(pipe_edges_out)],
+        #                '/tmp/pipe_wire2.FCStd')
+        #
+        # export_objects([pipe_wire,
+        #                 reference_face,
+        #                 jump1_wire,
+        #                 jump3_wire], '/tmp/pipe_wire.FCStd')
+        #
+        # export_objects([pipe_wire, cut_wire, reference_face.OuterWire], '/tmp/pipe_wire.FCStd')
+
+        print('done')
+
+    elif layout == 'Concentric':
+        pass
+
+    return pipe_wire
+
+
+def connect_h_lines(horizontal_lines,
+                    bending_radius,
+                    tube_diameter,
+                    pipe_edges,
+                    cut_wire,
+                    normal,     # reference face normal
+                    jump_wires,
+                    jump=1,
+                    i=1,
+                    side=1
+                    ):
+
+    pipe_edges.append(horizontal_lines[i])
+
+    while i + jump < horizontal_lines.__len__():
+
+        if jump == 1:
+            jump_wire = jump_wires[0]
+        else:
+            jump_wire = jump_wires[1]
+
+        con_edges = connect_lines(horizontal_lines[i],
+                                  horizontal_lines[i + jump],
+                                  side,
+                                  jump_wire)
+        pipe_edges.extend([*con_edges, horizontal_lines[i + jump]])
+
+        # export_objects([*con_edges], f'/tmp/connect_hlines_{i}.FCStd')
+        #
+        # export_objects([*pipe_edges,
+        #                 *jump_wires,
+        #                 FCPart.Compound(horizontal_lines)], f'/tmp/connect_hlines_{i}.FCStd')
+
+        i = i + jump
+
+        if side == 1:
+            side = 2
+        elif side == 2:
+            side = 1
+
+        if jump == 1:
+            jump = 3
+        elif jump == 3:
+            jump = 1
+
+    return pipe_edges, side
+
+
+def connect_lines(line1,
+                  line2,
+                  side,
+                  jump_wire      # reference face normal
+                  ):
+    c_edges = []
+
+    if side == 1:
+        extr_edge = extrude_edge(line1, side=side, dist=1000, include=False)
+        ex_cut1 = extr_edge.cut(jump_wire)
+        c_edge1 = ex_cut1.SubShapes[1]
+
+        extr_edge2 = extrude_edge(line2, side=side, dist=1000, include=False)
+        ex_cut2 = extr_edge2.cut(jump_wire)
+        c_edge3 = ex_cut2.SubShapes[1]
+
+    elif side == 2:
+        extr_edge = extrude_edge(line1, side=side, dist=1000, include=False)
+        ex_cut1 = extr_edge.cut(jump_wire)
+        c_edge1 = ex_cut1.SubShapes[0]
+
+        extr_edge2 = extrude_edge(line2, side=side, dist=1000, include=False)
+        ex_cut2 = extr_edge2.cut(jump_wire)
+        c_edge3 = ex_cut2.SubShapes[0]
+
+    BOPTools.SplitAPI.slice(jump_wire, [c_edge1, c_edge3], 'Split', tolerance=0.0)
+    split_shapes = BOPTools.SplitAPI.slice(jump_wire, [c_edge1, c_edge3], 'Split', tolerance=0.0)
+    # find the shortest sub shape:
+    sub_wires_length = [x.Length for x in split_shapes.SubShapes]
+    c_wire2 = split_shapes.SubShapes[sub_wires_length.index(min(sub_wires_length))]
+
+    c_edges = FCPart.sortEdges([c_edge1, *c_wire2.Edges, c_edge3])[0]
+
+    # export_objects([line1, line2, *c_edges, jump_wire], '/tmp/con_test.FCStd')
+    # export_objects([line1, line2, extr_edge, jump_wire], '/tmp/con_test.FCStd')
+
+    return c_edges
+    #
+    #
+    # if jump == 1:
+    #     dist = bending_radius
+    # elif jump == 3:
+    #     dist = bending_radius + 2.5 * tube_diameter
+    #
+    # if side == 1:
+    #     p0 = line1.Vertex1.Point
+    #     p1 = line1.Vertex1.Point - dist * line1.tangentAt(line1.FirstParameter)
+    #     p2 = line2.Vertex1.Point - dist * line2.tangentAt(line2.FirstParameter)
+    #     p3 = line2.Vertex1.Point
+    # elif side == 2:
+    #     p0 = line1.Vertex2.Point
+    #     p1 = line1.Vertex2.Point + dist * line1.tangentAt(line1.LastParameter)
+    #     p2 = line2.Vertex2.Point + dist * line2.tangentAt(line2.LastParameter)
+    #     p3 = line2.Vertex2.Point
+    #
+    # c_edges = []
+    #
+    # c_edge1 = FCPart.LineSegment(p0, p1).toShape()
+    # c_edges.append(c_edge1)
+    #
+    # c_edge5 = FCPart.LineSegment(p2, p3).toShape()
+    #
+    # angle = angle_between_vertices(p2, p1, p3)
+    # if angle_between_vertices(p2, p1, p3) != 90:
+    #     logger.debug(f'Creating complex connection between lines')
+    #
+    #     if side == 2:
+    #         if angle > 90:
+    #             #
+    #             #                 c_edge5
+    #             #       ------x--------------x p2
+    #             #           p3               |
+    #             #                    c_edge4 |
+    #             #                            |          c_edge3
+    #             #                            x-------------------------x
+    #             #                                                      |
+    #             #       --------------------------x---------------|    |
+    #             #                                                 |    |  c_edge2
+    #             #                                                 |    |
+    #             #       --------------------------x---------------|    |
+    #             #                                                      |
+    #             #       --------------------------x--------------------x p1
+    #             #                                p0       c_edge1
+    #             #
+    #
+    #             # vector perpendicular to c_edge1
+    #             p_vec = - perpendicular_vector(c_edge1.tangentAt(c_edge1.LastParameter), normal)
+    #             perp_line = FCPart.LineSegment(p1, p1 + Base.Vector(p_vec)).toShape()
+    #             ip1 = intersect_lines(perp_line, line2)[0].toShape().Point
+    #             perp_edge = FCPart.LineSegment(p1, ip1).toShape()
+    #             # perp_edge = FCPart.LineSegment(p1, intersect_point + Base.Vector(p_vec*100)).toShape()
+    #             i1 = perp_edge.cut(cut_wire)
+    #             if isinstance(i1, FCPart.Edge):
+    #                 c_edges.append(perp_edge)
+    #                 c_edges.append(c_edge5)
+    #             else:
+    #                 c2 = i1.SubShapes[0]
+    #
+    #                 # vertical line
+    #                 c_edge2 = FCPart.LineSegment(c2.valueAt(c2.FirstParameter),
+    #                                              c2.valueAt(c2.LastParameter - 0.5 * tube_diameter)).toShape()
+    #                 c_edges.append(c_edge2)
+    #
+    #                 # project point p2 on line c_edge3
+    #                 c3 = FCPart.LineSegment(c_edge2.valueAt(c_edge2.LastParameter),
+    #                                         c_edge2.valueAt(c_edge2.LastParameter) - c_edge1.tangentAt(c_edge1.LastParameter) * 1000000).toShape()
+    #                 ip2 = project_point_on_line(c_edge5.valueAt(c_edge5.FirstParameter), c3)
+    #
+    #                 # create c_edge3
+    #                 c_edge3 = FCPart.LineSegment(c_edge2.valueAt(c_edge2.LastParameter), Base.Vector(ip2)).toShape()
+    #                 c_edges.append(c_edge3)
+    #
+    #                 c_edge4 = FCPart.LineSegment(c_edge3.valueAt(c_edge3.LastParameter),
+    #                                              c_edge5.valueAt(c_edge5.FirstParameter)).toShape()
+    #                 c_edges.append(c_edge4)
+    #                 c_edges.append(c_edge5)
+    #
+    #         elif angle < 90:
+    #
+    #             #                                                                                     c_edge5
+    #             #       ------------------------------------------------------------------------x--------------x p2
+    #             #                                                                             p3               |
+    #             #                                                                                      c_edge4 |
+    #             #                                                     ip2                                      |
+    #             #                                                      x---------------------------------------x ip01
+    #             #                                                      |                 c_edge3
+    #             #       --------------------------x---------------|    |
+    #             #                                                 |    |  c_edge2
+    #             #                                                 |    |
+    #             #       --------------------------x---------------|    |
+    #             #                                                      |
+    #             #       --------------------------x--------------------x p1                                     x ip1
+    #             #                                p0       c_edge1
+    #             #
+    #
+    #             p_vec = - perpendicular_vector(c_edge5.tangentAt(c_edge5.FirstParameter), normal)
+    #             perp_line = FCPart.LineSegment(p2, p2 + Base.Vector(p_vec)).toShape()
+    #             ip1 = intersect_lines(perp_line, line1)[0].toShape().Point
+    #             perp_edge = FCPart.LineSegment(p2, ip1).toShape()
+    #             # perp_edge = FCPart.LineSegment(p1, intersect_point + Base.Vector(p_vec*100)).toShape()
+    #             i1 = perp_edge.cut(cut_wire)
+    #             if isinstance(i1, FCPart.Edge):
+    #                 c_edge3 = FCPart.LineSegment(perp_edge.valueAt(perp_edge.LastParameter),
+    #                                              p1).toShape()
+    #                 c_edges.append(c_edge3)
+    #                 c_edges.append(perp_edge)
+    #                 c_edges.append(c_edge5)
+    #
+    #             else:
+    #                 c2 = i1.SubShapes[0]
+    #
+    #                 if jump == 3:
+    #                     dist = 0.5 * tube_diameter
+    #                 elif jump == 1:
+    #                     dist = 1.5 * tube_diameter
+    #
+    #                 ip01 = c2.valueAt(c2.LastParameter - dist)
+    #                 c_edge4 = FCPart.LineSegment(ip01, p2).toShape()
+    #
+    #                 # project point p1 on line c_edge3
+    #                 c3 = FCPart.LineSegment(ip01, ip01 + c_edge5.tangentAt(c_edge1.FirstParameter) * 1000000).toShape()
+    #                 ip2 = Base.Vector(project_point_on_line(c_edge1.valueAt(c_edge1.LastParameter), c3))
+    #                 c_edge3 = FCPart.LineSegment(ip2, ip01).toShape()
+    #                 c_edge2 = FCPart.LineSegment(p1, ip2).toShape()
+    #
+    #                 c_edges.append(c_edge2)
+    #                 c_edges.append(c_edge3)
+    #                 c_edges.append(c_edge4)
+    #                 c_edges.append(c_edge5)
+    #
+    #     if side == 1:
+    #         if angle < 90:
+    #
+    #             c_edge2 = FCPart.LineSegment(p1, p2).toShape()
+    #             c_edges.append(c_edge2)
+    #             c_edge3 = FCPart.LineSegment(p2, p3).toShape()
+    #             c_edges.append(c_edge3)
+    #
+    #         elif angle > 90:
+    #
+    #             #
+    #             #                                                       p2     c_edge5       p3
+    #             #   ip1 x                                                x-------------------x-------------------
+    #             #                                                        |
+    #             #                                                        | c_edge4
+    #             #                          c_edge3                       |
+    #             #       x------------------------------------------------x
+    #             #       |
+    #             #       |   c_edge2
+    #             #       |
+    #             #       |
+    #             #       x-------------------x-------------------------------------------------------
+    #             #       p1     c_edge1      p0
+    #             #
+    #             #
+    #
+    #             c_edge5 = FCPart.LineSegment(p2, p3).toShape()
+    #
+    #             # vector perpendicular to c_edge1
+    #             p_vec = perpendicular_vector(c_edge1.tangentAt(c_edge1.LastParameter), normal)
+    #             perp_line = FCPart.LineSegment(p1, p1 + Base.Vector(p_vec)).toShape()
+    #             ip1 = intersect_lines(perp_line, line2)[0].toShape().Point
+    #             perp_edge = FCPart.LineSegment(p1, ip1).toShape()
+    #
+    #             i1 = perp_edge.cut(cut_wire)
+    #             if isinstance(i1, FCPart.Edge):
+    #                 c_edges.append(perp_edge)
+    #                 c_edge3 = FCPart.LineSegment(perp_edge.valueAt(perp_edge.LastParameter),
+    #                                              p2).toShape()
+    #                 c_edges.append(c_edge3)
+    #                 c_edges.append(c_edge5)
+    #             else:
+    #                 c2 = i1.SubShapes[0]
+    #
+    #                 c_edge2 = FCPart.LineSegment(c2.valueAt(c2.FirstParameter),
+    #                                              c2.valueAt(c2.LastParameter - 0.5 * tube_diameter)).toShape()
+    #                 c_edges.append(c_edge2)
+    #
+    #                 c3 = FCPart.LineSegment(c_edge2.valueAt(c_edge2.LastParameter),
+    #                                         c_edge2.valueAt(c_edge2.LastParameter) - c_edge1.tangentAt(
+    #                                             c_edge1.LastParameter) * 1000000).toShape()
+    #
+    #                 ip2 = project_point_on_line(c_edge5.valueAt(c_edge5.FirstParameter), c3)
+    #                 c_edge3 = FCPart.LineSegment(c_edge2.valueAt(c_edge2.LastParameter), Base.Vector(ip2)).toShape()
+    #                 c_edges.append(c_edge3)
+    #
+    #                 c_edge4 = FCPart.LineSegment(c_edge3.valueAt(c_edge3.LastParameter),
+    #                                              c_edge5.valueAt(c_edge5.FirstParameter)).toShape()
+    #                 c_edges.append(c_edge4)
+    #                 c_edges.append(c_edge5)
+    #
+    # else:
+    #     c_edge2 = FCPart.LineSegment(p1, p2).toShape()
+    #     c_edges.append(c_edge2)
+    #     c_edge3 = FCPart.LineSegment(p2, p3).toShape()
+    #     c_edges.append(c_edge3)
+    #
+    # # export_objects([intersection, perp_edge], '/tmp/intersection.FCStd')
+    #
+    # # export_objects(c_edges, '/tmp/c_edges.FCStd')
+    #
+    # return c_edges
