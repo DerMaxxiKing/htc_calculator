@@ -13,3 +13,4 @@ meshio
 PyFoam
 pyobb
 shapely
+scipy
