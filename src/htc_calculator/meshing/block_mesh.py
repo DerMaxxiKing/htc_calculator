@@ -450,6 +450,13 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
     def __hash__(self):
         return id(self)
 
+    if type(edge.Curve) is FCPart.Line:
+        return [BlockMeshEdge(vertices=[p1[i], p2[i]], type='line') for i in range(4)]
+    else:
+        edges = [None] * 4
+        for i in range(4):
+            # move center point
+            center = np.array(edge.Curve.Center) + (p1[i].position - edge.Vertexes[0].Point) * face_normal
 
 class Block(object, metaclass=BlockMetaMock):
 
@@ -508,6 +515,18 @@ class Block(object, metaclass=BlockMetaMock):
 
         layer1:
 
+    try:
+        shell = FCPart.makeShell(faces)
+        shell.sewShape()
+        try:
+            shell.fix(1e-5, 1e-5, 1e-5)
+        except Exception as e:
+            logger.warning(f'Could not fix block shell')
+        solid = FCPart.Solid(shell)
+    except Exception as e:
+        logger.error(f'Error creating geometric volume for {block.__repr__()}: {e}')
+        save_fcstd(faces, f'/tmp/error_shape_{block.id}.FCStd')
+        raise e
 
         layer2:
 

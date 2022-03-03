@@ -91,7 +91,7 @@ if __name__ == '__main__':
                               [2500, 2500, 0],
                               [0, 2500, 0]])
 
-    # pipe_wires.append(test_polygon(poly_vertices))
+    pipe_wires.append(test_polygon(poly_vertices))
 
     poly_vertices2 = np.array([[2500, 0, 0],
                                [7500, 0, 0],
@@ -113,7 +113,7 @@ if __name__ == '__main__':
                                [0, 2500, 0],
                                [5000, 2500, 0]])
 
-    # pipe_wires.append(test_polygon(poly_vertices3))
+    pipe_wires.append(test_polygon(poly_vertices3))
 
     poly_vertices4 = np.array([[5000, 0, 0],
                                [12500, 0, 0],
@@ -124,7 +124,7 @@ if __name__ == '__main__':
                                [0, 2500, 0],
                                [2500, 2500, 0]])
 
-    # pipe_wires.append(test_polygon(poly_vertices4))
+    pipe_wires.append(test_polygon(poly_vertices4))
 
     pipe_wires_radius = test_add_radius(pipe_wires, 100)
 

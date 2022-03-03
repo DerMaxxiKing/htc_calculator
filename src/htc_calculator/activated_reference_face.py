@@ -317,6 +317,7 @@ class ActivatedReferenceFace(ReferenceFace):
 
         print('done')
 
+        free_blocks = create_blocks_from_2d_mesh(quad_meshes, self)
 
     # def generate_hole_part(self):
     #
@@ -409,6 +410,7 @@ class ActivatedReferenceFace(ReferenceFace):
         gm.read_and_set_new_mesh()
         doc.recompute()
 
+        Block.save_fcstd('/tmp/blocks2.FCStd')
 
 def replace(arr, find, replace):
     # fast and readable
