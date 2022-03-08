@@ -1,10 +1,11 @@
 import copy
+import os.path
 import uuid
 import itertools
 import numpy as np
 from functools import lru_cache, wraps
 from ..logger import logger
-from ..tools import vector_to_np_array, perpendicular_vector
+from ..tools import vector_to_np_array, perpendicular_vector, export_objects, angle_between_vectors
 
 import FreeCAD
 import Part as FCPart
@@ -12,6 +13,14 @@ import Draft
 from FreeCAD import Base
 import DraftVecUtils
 import PartDesign
+
+try:
+    import importlib.resources as pkg_resources
+except ImportError:
+    # Try backported to PY<37 `importlib_resources`.
+    import importlib_resources as pkg_resources
+
+from . import meshing_resources as msh_resources
 
 App = FreeCAD
 
@@ -40,11 +49,11 @@ class VertexMetaMock(type):
     @staticmethod
     # @np_cache
     def get_vertex(position):
-        logger.debug('Getting vertex...')
+        # logger.debug('Getting vertex...')
         # return next((x for x in VertexMetaMock.instances if np.allclose(x.position, position, atol=1e-3)), None)
         vert = VertexMetaMock.instances.get(tuple(position), None)
-        if vert is not None:
-            logger.debug('Vertex already existing')
+        # if vert is not None:
+        #     logger.debug('Vertex already existing')
         return vert
 
     def __call__(cls, *args, **kwargs):
@@ -66,7 +75,7 @@ class EdgeMetaMock(type):
                  vertices=None,
                  vertex_ids: tuple[int] = None,
                  create=False):
-        logger.debug('Getting edge...')
+        # logger.debug('Getting edge...')
         # return next((x for x in EdgeMetaMock.instances if np.array_equal(x.vertices, vertices)), None)
         if vertices is not None:
             edge = EdgeMetaMock.instances.get(tuple(sorted([vertices[0].id, vertices[1].id])), None)
@@ -78,8 +87,8 @@ class EdgeMetaMock(type):
             if create:
                 edge = self(vertices=[list(BlockMeshVertex.instances.values())[vertex_ids[0]],
                                       list(BlockMeshVertex.instances.values())[vertex_ids[1]]])
-        if edge is not None:
-            logger.debug('Edge already existing')
+        # if edge is not None:
+        #     logger.debug('Edge already existing')
         return edge
 
     def __call__(cls, *args, **kwargs):
@@ -99,12 +108,12 @@ class FaceMetaMock(type):
 
     @staticmethod
     def get_face(vertices):
-        logger.debug('Getting face...')
+        # logger.debug('Getting face...')
         # raise NotImplementedError
         # return next((x for x in EdgeMetaMock.instances if np.array_equal(x.vertices, vertices)), None)
         face = FaceMetaMock.instances.get(tuple(sorted(vertices)), None)
-        if face is not None:
-            logger.debug('Face already existing')
+        # if face is not None:
+        #     logger.debug('Face already existing')
         return face
 
     def __call__(cls, *args, **kwargs):
@@ -161,12 +170,19 @@ class BlockMeshVertex(object, metaclass=VertexMetaMock):
 
     @classmethod
     def block_mesh_entry(cls):
-        return ''
+        vertex_entries = [None] * cls.instances.values().__len__()
+        for i, vertex in enumerate(VertexMetaMock.instances.values()):
+            vertex_entries[i] = '\t' + vertex.dict_entry
+        return f'vertices\n(\n' + "\n".join(vertex_entries) + '\n);\n'
 
     def __init__(self, *args, **kwargs):
         self.id: int = next(BlockMeshVertex.id_iter)
         self.position = kwargs.get('position', np.array([0, 0, 0]))
         self._fc_vertex = None
+
+        self.edges = set()
+        self.faces = set()
+        self.blocks = set()
 
     def __add__(self, vec):
         return BlockMeshVertex(position=self.position + vec)
@@ -182,6 +198,10 @@ class BlockMeshVertex(object, metaclass=VertexMetaMock):
         if self._fc_vertex is None:
             self._fc_vertex = FCPart.Point(Base.Vector(self.position[0], self.position[1], self.position[2]))
         return self._fc_vertex
+
+    @property
+    def dict_entry(self):
+        return f'name v{self.id} ({self.position[0]:16.6f} {self.position[1]:16.6f} {self.position[2]:16.6f})'
 
     def dist_to_point(self, vertex):
         return np.linalg.norm(self.position - vertex.position)
@@ -208,6 +228,13 @@ class BlockMeshVertex(object, metaclass=VertexMetaMock):
 class BlockMeshEdge(object, metaclass=EdgeMetaMock):
     id_iter = itertools.count()
 
+    @classmethod
+    def block_mesh_entry(cls):
+        edge_entries = [None] * cls.instances.values().__len__()
+        for i, edge in enumerate(EdgeMetaMock.instances.values()):
+            edge_entries[i] = '\t' + edge.dict_entry
+        return f'edges\n(\n' + "\n".join(edge_entries) + '\n);\n'
+
     def __init__(self, *args, **kwargs):
         """
 
@@ -222,11 +249,25 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
         self.id = next(BlockMeshEdge.id_iter)
         self.vertices = kwargs.get('vertices')
 
-        self.type = kwargs.get('type')
+        self.type = kwargs.get('type', 'line')      # arc or line
         self.center = kwargs.get('center', None)
         self.interpolation_points = kwargs.get('interpolation_points', None)
 
         self._fc_edge = None
+        self._collapsed = False
+
+        self.vertices[0].edges.add(self)
+        self.vertices[1].edges.add(self)
+
+        self.faces = set()
+        self.blocks = set()
+
+    @property
+    def length(self):
+        if self.fc_edge is not None:
+            return self.fc_edge.Length
+        else:
+            return 0
 
     @property
     def fc_edge(self):
@@ -235,22 +276,44 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
         return self._fc_edge
 
     def create_fc_edge(self):
-        if self.type == 'arc':
-            return FCPart.Edge(FCPart.Arc(Base.Vector(self.vertices[0].position),
-                                          Base.Vector(self.interpolation_points[0]),
-                                          Base.Vector(self.vertices[1].position))
-                               )
-        elif self.type in ['line', None]:
-            return FCPart.Edge(FCPart.LineSegment(Base.Vector(self.vertices[0].position),
-                                                  Base.Vector(self.vertices[1].position)))
+        if self.vertices[0].fc_vertex == self.vertices[1].fc_vertex:
+            self._collapsed = True
+            return None
+        else:
+            self._collapsed = False
+            if self.type == 'arc':
+                return FCPart.Edge(FCPart.Arc(Base.Vector(self.vertices[0].position),
+                                              Base.Vector(self.interpolation_points[0]),
+                                              Base.Vector(self.vertices[1].position))
+                                   )
+            elif self.type in ['line', None]:
+                return FCPart.Edge(FCPart.LineSegment(Base.Vector(self.vertices[0].position),
+                                                      Base.Vector(self.vertices[1].position)))
 
     def __repr__(self):
-        return f'Edge {self.id} (type={self.type}, v1={self.vertices[0].id}, v2={self.vertices[1].id} interpolation_points={self.interpolation_points})'
+        return f'Edge {self.id} (length={self.length}, type={self.type}, v1={self.vertices[0].id}, v2={self.vertices[1].id} interpolation_points={self.interpolation_points})'
+
+    @property
+    def dict_entry(self):
+        if self.type == 'line':
+            return f'line v{self.vertices[0].id} v{self.vertices[1].id}'
+        elif self.type == 'arc':
+            return f'arc {self.vertices[0].id} {self.vertices[1].id} ' \
+                   f'({self.interpolation_points[0][0]:16.6f} ' \
+                   f'{self.interpolation_points[0][1]:16.6f} ' \
+                   f'{self.interpolation_points[0][2]:16.6f})'
 
 
 class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
 
     id_iter = itertools.count()
+
+    @classmethod
+    def block_mesh_entry(cls):
+        boundary_entries = [None] * cls.instances.values().__len__()
+        for i, boundary in enumerate(BoundaryMetaMock.instances.values()):
+            boundary_entries[i] = '\t' + boundary.dict_entry
+        return f'boundary\n(\n' + "\n".join(boundary_entries) + '\n);\n'
 
     def __init__(self, *args, **kwargs):
 
@@ -274,8 +337,174 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         self._faces = value
         [x.set_boundary(self) for x in self._faces]
 
+    @property
+    def dict_entry(self):
+        faces_entry = "\n".join(['\t\t\t(' + ' '.join([str(y.id) for y in x.vertices]) + ')' for x in self.faces])
+
+        return (f"\t{self.name}\n"
+                f"\t{'{'}\n"
+                f"\t\ttype {self.type};\n"
+                f"\t\tfaces\n"
+                f"\t\t(\n"
+                f"{faces_entry}\n"
+                f"\t\t);\n"
+                f"\t{'}'}")
+
     def __repr__(self):
         return f'Boundary {self.id} (name={self.name}, type={self.type}, faces={self.faces})'
+
+
+class BlockMesh(object):
+
+    default_path = '/tmp/'
+
+    def __init__(self, *args, **kwargs):
+        self._id = kwargs.get('_id', kwargs.get('id', uuid.uuid4()))
+        self._name = kwargs.get('_name', kwargs.get('name', 'BlockMesh {}'.format(self._id)))
+        self._case_dir = kwargs.get('_case_dir', kwargs.get('case_dir', None))
+
+        self.template = pkg_resources.read_text(msh_resources, 'block_mesh_dict')
+        self._block_mesh_dict = None
+        self._control_dict = None
+        self._fvschemes = None
+        self._fvsolution = None
+
+    @property
+    def id(self):
+        return self._id
+
+    @id.setter
+    def id(self, value):
+        if value == self._id:
+            return
+        self._id = value
+
+    @property
+    def control_dict(self):
+        if self._control_dict is None:
+            self._control_dict = pkg_resources.read_text(msh_resources, 'controlDict')
+        return self._control_dict
+
+    @control_dict.setter
+    def control_dict(self, value):
+        if value == self._control_dict:
+            return
+        self._control_dict = value
+
+    @property
+    def block_mesh_dict(self):
+        if self._block_mesh_dict is None:
+            self._block_mesh_dict = self.create_block_mesh_dict()
+        return self._block_mesh_dict
+
+    @block_mesh_dict.setter
+    def block_mesh_dict(self, value):
+        if value == self._block_mesh_dict:
+            return
+        self._block_mesh_dict = value
+
+    @property
+    def fvschemes(self):
+        if self._fvschemes is None:
+            self._fvschemes = pkg_resources.read_text(msh_resources, 'fvSchemes')
+        return self._fvschemes
+
+    @fvschemes.setter
+    def fvschemes(self, value):
+        if value == self._fvschemes:
+            return
+        self._fvschemes = value
+
+    @property
+    def fvsolution(self):
+        if self._fvsolution is None:
+            self._fvsolution = pkg_resources.read_text(msh_resources, 'fvSolution')
+        return self._fvsolution
+
+    @fvsolution.setter
+    def fvsolution(self, value):
+        if value == self._fvsolution:
+            return
+        self._fvsolution = value
+
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, value):
+        if value == self._name:
+            return
+        self._name = value
+
+    @property
+    def case_dir(self):
+        if self._case_dir is None:
+            self._case_dir = os.path.join(self.default_path, 'case_' + str(self.id.hex))
+        return self._case_dir
+
+    @case_dir.setter
+    def case_dir(self, value):
+        if value == self._case_dir:
+            return
+        self._case_dir = value
+
+    def init_case(self):
+        logger.info('Initializing case...')
+
+        os.makedirs(self.case_dir, exist_ok=True)
+        os.makedirs(os.path.join(self.case_dir, '0'), exist_ok=True)
+        os.makedirs(os.path.join(self.case_dir, 'constant'), exist_ok=True)
+        os.makedirs(os.path.join(self.case_dir, 'system'), exist_ok=True)
+
+        self.write_control_dict()
+        self.write_fv_schemes()
+        self.write_fv_solution()
+        self.write_block_mesh_dict()
+
+        logger.info('Case successfully initialized')
+
+    def write_control_dict(self):
+
+        with open(os.path.join(self.case_dir, 'system', "controlDict"), mode="w") as f:
+            f.write(self.control_dict)
+
+    def write_fv_schemes(self):
+        with open(os.path.join(self.case_dir, 'system', "fvSchemes"), "w") as f:
+            f.write(self.fvschemes)
+
+    def write_fv_solution(self):
+        with open(os.path.join(self.case_dir, 'system', "fvSolution"), "w") as f:
+            f.write(self.fvsolution)
+
+    @staticmethod
+    def create_block_mesh_dict():
+
+        logger.info('Creating blockMeshDict...')
+
+        template = pkg_resources.read_text(msh_resources, 'block_mesh_dict')
+
+        vertices_entry = BlockMeshVertex.block_mesh_entry()
+        template = template.replace('<vertices>', vertices_entry)
+
+        edges_entry = BlockMeshEdge.block_mesh_entry()
+        template = template.replace('<edges>', edges_entry)
+
+        block_entry = Block.block_mesh_entry()
+        template = template.replace('<blocks>', block_entry)
+
+        boundary_entry = BlockMeshBoundary.block_mesh_entry()
+        template = template.replace('<boundary>', boundary_entry)
+
+        template = template.replace('<faces>', '')
+
+        template = template.replace('<merge_patch_pairs>', '')
+
+        return template
+
+    def write_block_mesh_dict(self):
+        with open(os.path.join(self.case_dir, 'system', "blockMeshDict"), "w") as f:
+            f.write(self.block_mesh_dict)
 
 
 inlet_patch = BlockMeshBoundary(name='inlet', type='patch')
@@ -310,6 +539,18 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
 
         self.extruded = kwargs.get('extruded', False)   # false or: [base_profile, top_profile, path1, path2]
 
+        _ = [x.faces.add(self) for x in self.vertices]
+
+        self.blocks = set()
+        _ = self.edges
+
+    @property
+    def area(self):
+        if self.fc_face is not None:
+            return self.fc_face.Area
+        else:
+            return 0
+
     @property
     def boundary(self):
         return self._boundary
@@ -326,6 +567,7 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
             self._edge0 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[0].id,
                                                                           self.vertices[1].id])),
                                                  create=True)
+            self._edge0.faces.add(self)
         return self._edge0
 
     @property
@@ -334,6 +576,7 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
             self._edge1 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[1].id,
                                                                           self.vertices[2].id])),
                                                  create=True)
+            self._edge1.faces.add(self)
         return self._edge1
 
     @property
@@ -342,6 +585,7 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
             self._edge2 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[2].id,
                                                                           self.vertices[3].id])),
                                                  create=True)
+            self._edge2.faces.add(self)
         return self._edge2
 
     @property
@@ -350,6 +594,7 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
             self._edge3 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[3].id,
                                                                           self.vertices[0].id])),
                                                  create=True)
+            self._edge3.faces.add(self)
         return self._edge3
 
     @property
@@ -426,13 +671,17 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
             #     ps.build()
             # face = ps.shape()
         else:
-            edges = [x.fc_edge for x in self.edges]
-            face_wire = FCPart.Wire(edges)
+            edges = [x.fc_edge for x in self.edges if x.fc_edge is not None]
 
-            try:
-                face = FCPart.Face(face_wire)
-            except:
-                face = FCPart.makeFilledFace(FCPart.Wire(edges).OrderedEdges)
+            if edges.__len__() < 3:
+                return None
+            else:
+                face_wire = FCPart.Wire(edges)
+
+                try:
+                    face = FCPart.Face(face_wire)
+                except:
+                    face = FCPart.makeFilledFace(FCPart.Wire(edges).OrderedEdges)
 
             # face = make_complex_face_from_edges(face_wire.OrderedEdges)
 
@@ -442,7 +691,7 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
         return face
 
     def __repr__(self):
-        return f'Face {self.id} (type={self.boundary}, Vertices={self.vertices})'
+        return f'Face {self.id} (type={self.boundary}, Area={self.area}, Vertices={self.vertices})'
 
     def __eq__(self, other):
         return sorted(self.vertices) == sorted(other.vertices)
@@ -450,13 +699,14 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
     def __hash__(self):
         return id(self)
 
-    if type(edge.Curve) is FCPart.Line:
-        return [BlockMeshEdge(vertices=[p1[i], p2[i]], type='line') for i in range(4)]
-    else:
-        edges = [None] * 4
-        for i in range(4):
-            # move center point
-            center = np.array(edge.Curve.Center) + (p1[i].position - edge.Vertexes[0].Point) * face_normal
+    # if type(edge.Curve) is FCPart.Line:
+    #     return [BlockMeshEdge(vertices=[p1[i], p2[i]], type='line') for i in range(4)]
+    # else:
+    #     edges = [None] * 4
+    #     for i in range(4):
+    #         # move center point
+    #         center = np.array(edge.Curve.Center) + (p1[i].position - edge.Vertexes[0].Point) * face_normal
+
 
 class Block(object, metaclass=BlockMetaMock):
 
@@ -489,7 +739,10 @@ class Block(object, metaclass=BlockMetaMock):
 
     @classmethod
     def block_mesh_entry(cls):
-        return ''
+        block_entries = [None] * cls.instances.__len__()
+        for i, block in enumerate(BlockMetaMock.instances):
+            block_entries[i] = '\t' + block.dict_entry
+        return f'blocks\n(\n' + "\n".join(block_entries) + '\n);\n'
 
     @classmethod
     def save_fcstd(cls, filename):
@@ -552,6 +805,7 @@ class Block(object, metaclass=BlockMetaMock):
         self.auto_cell_size = kwargs.get('auto_cell_size', True)
         self.cell_size = kwargs.get('cell_size', 100)
 
+        self.non_regular = kwargs.get('non_regular', False)
         self.extruded = kwargs.get('extruded', False)
 
         self._face0 = kwargs.get('face0', None)
@@ -574,6 +828,50 @@ class Block(object, metaclass=BlockMetaMock):
         self._edge10 = kwargs.get('edge10', None)
         self._edge11 = kwargs.get('edge11', None)
 
+        _ = self.block_edges
+        _ = self.faces
+
+    @property
+    def dict_entry(self):
+
+        corrected_vertices = self.vertices
+
+        if self.non_regular:
+            v0 = self.vertices[2].fc_vertex.toShape().Point - self.vertices[1].fc_vertex.toShape().Point
+            v1 = self.vertices[0].fc_vertex.toShape().Point - self.vertices[1].fc_vertex.toShape().Point
+            v2 = self.vertices[5].fc_vertex.toShape().Point - self.vertices[1].fc_vertex.toShape().Point
+
+            v2_ref = v0.normalize().cross(v1.normalize()).normalize()
+
+            if np.allclose(v2_ref, v2.normalize()):
+                corrected_vertices = np.array(self.vertices)[np.array([1, 2, 3, 0, 5, 6, 7, 4])].tolist()
+            elif np.allclose(v2_ref, -v2.normalize()):
+                corrected_vertices = np.array(self.vertices)[np.array([5, 6, 7, 4, 1, 2, 3, 0])].tolist()
+            else:
+                if abs(angle_between_vectors(v2_ref, v2, v0)) < 90:
+                    corrected_vertices = np.array(self.vertices)[np.array([1, 2, 3, 0, 5, 6, 7, 4])].tolist()
+                else:
+                    corrected_vertices = np.array(self.vertices)[np.array([5, 6, 7, 4, 1, 2, 3, 0])].tolist()
+
+        else:
+            v0 = self.vertices[1].fc_vertex.toShape().Point - self.vertices[0].fc_vertex.toShape().Point
+            v1 = self.vertices[3].fc_vertex.toShape().Point - self.vertices[0].fc_vertex.toShape().Point
+            v2 = self.vertices[4].fc_vertex.toShape().Point - self.vertices[0].fc_vertex.toShape().Point
+
+            v2_ref = v0.normalize().cross(v1.normalize()).normalize()
+
+            if np.allclose(v2_ref, v2.normalize()):
+                corrected_vertices = self.vertices
+            elif np.allclose(v2_ref,-v2.normalize()):
+                corrected_vertices = [*self.vertices[4:], *self.vertices[0:4]]
+            else:
+                if abs(angle_between_vectors(v2_ref, v2, v0)) < 90:
+                    corrected_vertices = self.vertices
+                else:
+                    corrected_vertices = [*self.vertices[4:], *self.vertices[0:4]]
+
+        return f"hex ({' '.join(['v' + str(x.id) for x in corrected_vertices])}) (10 10 10) simpleGrading (1 1 1)"
+
     # @property
     # def center_line(self):
     #     return self.faces[0].C
@@ -581,12 +879,14 @@ class Block(object, metaclass=BlockMetaMock):
     def face0(self):
         if self._face0 is None:
             self._face0 = BlockMeshFace(vertices=[self.vertices[x] for x in Block.face_map['inlet']])
+            self._face0.blocks.add(self)
         return self._face0
 
     @property
     def face1(self):
         if self._face1 is None:
             self._face1 = BlockMeshFace(vertices=[self.vertices[x] for x in Block.face_map['outlet']])
+            self._face1.blocks.add(self)
         return self._face1
 
     @property
@@ -599,6 +899,7 @@ class Block(object, metaclass=BlockMetaMock):
 
             self._face2 = BlockMeshFace(vertices=[self.vertices[x] for x in Block.face_map['left']],
                                         extruded=extruded)
+            self._face2.blocks.add(self)
         return self._face2
 
     @property
@@ -611,6 +912,7 @@ class Block(object, metaclass=BlockMetaMock):
 
             self._face3 = BlockMeshFace(vertices=[self.vertices[x] for x in Block.face_map['right']],
                                         extruded=extruded)
+            self._face3.blocks.add(self)
         return self._face3
 
     @property
@@ -623,6 +925,7 @@ class Block(object, metaclass=BlockMetaMock):
 
             self._face4 = BlockMeshFace(vertices=[self.vertices[x] for x in Block.face_map['top']],
                                         extruded=extruded)
+            self._face4.blocks.add(self)
         return self._face4
 
     @property
@@ -635,6 +938,7 @@ class Block(object, metaclass=BlockMetaMock):
 
             self._face5 = BlockMeshFace(vertices=[self.vertices[x] for x in Block.face_map['bottom']],
                                         extruded=extruded)
+            self._face5.blocks.add(self)
         return self._face5
 
     @property
@@ -648,6 +952,7 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge0 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[v_map[0]].id,
                                                                           self.vertices[v_map[1]].id])),
                                                  create=True)
+            self._edge0.blocks.add(self)
         return self._edge0
 
     @property
@@ -657,6 +962,7 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge1 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[v_map[0]].id,
                                                                           self.vertices[v_map[1]].id])),
                                                  create=True)
+            self._edge1.blocks.add(self)
         return self._edge1
 
     @property
@@ -666,6 +972,7 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge2 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[v_map[0]].id,
                                                                           self.vertices[v_map[1]].id])),
                                                  create=True)
+            self._edge2.blocks.add(self)
         return self._edge2
 
     @property
@@ -675,6 +982,7 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge3 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[v_map[0]].id,
                                                                           self.vertices[v_map[1]].id])),
                                                  create=True)
+            self._edge3.blocks.add(self)
         return self._edge3
 
     @property
@@ -684,6 +992,7 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge4 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[v_map[0]].id,
                                                                           self.vertices[v_map[1]].id])),
                                                  create=True)
+            self._edge4.blocks.add(self)
         return self._edge4
 
     @property
@@ -693,6 +1002,7 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge5 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[v_map[0]].id,
                                                                           self.vertices[v_map[1]].id])),
                                                  create=True)
+            self._edge5.blocks.add(self)
         return self._edge5
 
     @property
@@ -702,6 +1012,7 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge6 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[v_map[0]].id,
                                                                           self.vertices[v_map[1]].id])),
                                                  create=True)
+            self._edge6.blocks.add(self)
         return self._edge6
 
     @property
@@ -711,6 +1022,7 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge7 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[v_map[0]].id,
                                                                           self.vertices[v_map[1]].id])),
                                                  create=True)
+            self._edge7.blocks.add(self)
         return self._edge7
 
     @property
@@ -720,6 +1032,7 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge8 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[v_map[0]].id,
                                                                           self.vertices[v_map[1]].id])),
                                                  create=True)
+            self._edge8.blocks.add(self)
         return self._edge8
 
     @property
@@ -729,6 +1042,7 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge9 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[v_map[0]].id,
                                                                           self.vertices[v_map[1]].id])),
                                                  create=True)
+            self._edge9.blocks.add(self)
         return self._edge9
 
     @property
@@ -738,6 +1052,7 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge10 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[v_map[0]].id,
                                                                            self.vertices[v_map[1]].id])),
                                                   create=True)
+            self._edge10.blocks.add(self)
         return self._edge10
 
     @property
@@ -747,6 +1062,7 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge11 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[v_map[0]].id,
                                                                            self.vertices[v_map[1]].id])),
                                                   create=True)
+            self._edge11.blocks.add(self)
         return self._edge11
 
     @property
@@ -807,7 +1123,7 @@ class Block(object, metaclass=BlockMetaMock):
 
     def create_fc_solid(self):
         faces = []
-        _ = [faces.extend(face.fc_face.Faces) for face in self.faces]
+        _ = [faces.extend(face.fc_face.Faces) for face in self.faces if face.fc_face is not None]
 
         try:
             shell = FCPart.makeShell(faces)
@@ -955,10 +1271,10 @@ def create_o_grid_blocks(edge,
                            outer_pipe=outer_pipe)
 
     if inlet:
-        for i in [0, 1, 2, 3]:
+        for i in [0, 1, 2, 3, 4]:
             blocks[i].faces[0].boundary = inlet_patch
     if outlet:
-        for i in [0, 1, 2, 3]:
+        for i in [0, 1, 2, 3, 4]:
             blocks[i].faces[1].boundary = outlet_patch
 
     return blocks
@@ -1202,91 +1518,6 @@ def create_blocks(layer1_vertices,
             #     logger.error(f'Block error')
             blocks.append(new_block)
 
-        # index = [4, 19, 8, 9]
-        # vertices = [*[layer1_vertices[x] for x in index], *[layer2_vertices[x] for x in index]]
-        # edge_index = [12, 31, 20, 13]
-        # block_edges = [*[layer1_edges[x] for x in edge_index], *[layer2_edges[x] for x in edge_index]]
-        # b5 = Block(name=f'Outer Block 5, edge {edge}',
-        #            vertices=vertices,
-        #            edge=edge,
-        #            block_edges=block_edges,
-        #            num_cells=num_cells)
-
-        # index = [4, 9, 10, 5]
-        # vertices = [*[layer1_vertices[x] for x in index], *[layer2_vertices[x] for x in index]]
-        # edge_index = [13, 21, 14, 8]
-        # block_edges = [*[layer1_edges[x] for x in edge_index], *[layer2_edges[x] for x in edge_index]]
-        # b6 = Block(name=f'Outer Block 6, edge {edge}',
-        #            vertices=vertices,
-        #            edge=edge,
-        #            block_edges=block_edges,
-        #            num_cells=num_cells)
-
-        # index = [5, 10, 11, 12]
-        # vertices = [*[layer1_vertices[x] for x in index], *[layer2_vertices[x] for x in index]]
-        # edge_index = [14, 22, 23, 15]
-        # block_edges = [*[layer1_edges[x] for x in edge_index], *[layer2_edges[x] for x in edge_index]]
-        # b7 = Block(name=f'Outer Block 7, edge {edge}',
-        #            vertices=vertices,
-        #            edge=edge,
-        #            block_edges=block_edges,
-        #            num_cells=num_cells)
-
-        # index = [5, 12, 13, 6]
-        # vertices = [*[layer1_vertices[x] for x in index], *[layer2_vertices[x] for x in index]]
-        # edge_index = [15, 24, 16, 9]
-        # block_edges = [*[layer1_edges[x] for x in edge_index], *[layer2_edges[x] for x in edge_index]]
-        # b8 = Block(name=f'Outer Block 8, edge {edge}',
-        #            vertices=vertices,
-        #            edge=edge,
-        #            block_edges=block_edges,
-        #            num_cells=num_cells)
-
-        # index = [6, 13, 14, 15]
-        # vertices = [*[layer1_vertices[x] for x in index], *[layer2_vertices[x] for x in index]]
-        # edge_index = [16, 25, 26, 17]
-        # block_edges = [*[layer1_edges[x] for x in edge_index], *[layer2_edges[x] for x in edge_index]]
-        # b9 = Block(name=f'Outer Block 9, edge {edge}',
-        #            vertices=vertices,
-        #            edge=edge,
-        #            block_edges=block_edges,
-        #            num_cells=num_cells)
-
-        # index = [6, 15, 16, 7]
-        # vertices = [*[layer1_vertices[x] for x in index], *[layer2_vertices[x] for x in index]]
-        # edge_index = [17, 27, 18, 10]
-        # block_edges = [*[layer1_edges[x] for x in edge_index], *[layer2_edges[x] for x in edge_index]]
-        # b10 = Block(name=f'Outer Block 10, edge {edge}',
-        #             vertices=vertices,
-        #             edge=edge,
-        #             block_edges=block_edges,
-        #             num_cells=num_cells)
-
-        # index = [7, 16, 17, 18]
-        # vertices = [*[layer1_vertices[x] for x in index], *[layer2_vertices[x] for x in index]]
-        # edge_index = [18, 28, 29, 19]
-        # block_edges = [*[layer1_edges[x] for x in edge_index], *[layer2_edges[x] for x in edge_index]]
-        # b11 = Block(name=f'Outer Block 11, edge {edge}',
-        #             vertices=vertices,
-        #             edge=edge,
-        #             block_edges=block_edges,
-        #             num_cells=num_cells)
-
-        # index = [7, 18, 19, 4]
-        # vertices = [*[layer1_vertices[x] for x in index], *[layer2_vertices[x] for x in index]]
-        # edge_index = [19, 30, 12, 11]
-        # block_edges = [*[layer1_edges[x] for x in edge_index], *[layer2_edges[x] for x in edge_index]]
-        # b12 = Block(name=f'Outer Block 12, edge {edge}',
-        #             vertices=vertices,
-        #             edge=edge,
-        #             block_edges=block_edges,
-        #             num_cells=num_cells)
-
-        # return [b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12]
-
-    # else:
-    #     return [b0, b1, b2, b3, b4]
-
     return blocks
 
 
@@ -1343,21 +1574,6 @@ def create_box_from_points(block, vertices=None, edge=None, block_edges=None):
             save_fcstd([face_wire.OrderedEdges], f'/tmp/error_shape_{block.id}.FCStd')
             save_fcstd(faces, f'/tmp/error_faces_{block.id}.FCStd')
             raise e
-
-        # try:
-        #     face_wire = FCPart.Wire(edges)
-        #     face = FCPart.Face(face_wire)
-        # except Exception as e:
-        #     try:
-        #         ace = make_complex_face_from_edges(edges)
-        #         face = make_complex_face_from_edges(face_wire.OrderedEdges)
-        #         # face = FCPart.makeFilledFace(face_wire.OrderedEdges)
-        #     except Exception as e:
-        #         logger.error(f'Error creating geometric face {key} for {block.__repr__()}: {e}')
-        #         save_fcstd(face_wire.OrderedEdges, f'/tmp/fghedges_shape_{block.id}.FCStd')
-        #         save_fcstd([face_wire.OrderedEdges], f'/tmp/error_shape_{block.id}.FCStd')
-        #         save_fcstd(faces, f'/tmp/error_faces_{block.id}.FCStd')
-        #         raise e
         faces.extend(face.Faces)
 
     try:
@@ -1445,16 +1661,29 @@ def create_blocks_from_2d_mesh(meshes, reference_face):
 
         # create quad blocks:
         blocks = []
-        for quad in mesh.cells_dict['quad']:
+        if 'quad' in mesh.cells_dict.keys():
+            for quad in mesh.cells_dict['quad']:
 
-            v_1 = vertices[quad]
-            v_2 = np.array([x + 2 * trans_base_vec for x in v_1])
-            new_block = Block(vertices=[*v_1, *v_2],
-                              name=f'Free Block',
-                              auto_cell_size=True,
-                              extruded=False)
-            blocks.append(new_block)
+                v_1 = vertices[quad]
+                v_2 = np.array([x + 2 * trans_base_vec for x in v_1])
+                new_block = Block(vertices=[*v_1, *v_2],
+                                  name=f'Free Block',
+                                  auto_cell_size=True,
+                                  extruded=False)
+                blocks.append(new_block)
 
+        if 'triangle' in mesh.cells_dict.keys():
+            for tri in mesh.cells_dict['triangle']:
+                v_1 = vertices[[*tri, tri[0]]]
+                v_2 = np.array([x + 2 * trans_base_vec for x in v_1])
+
+                new_block = Block(vertices=[*v_1, *v_2],
+                                  name=f'Free Block',
+                                  auto_cell_size=True,
+                                  extruded=False,
+                                  non_regular=True)
+
+                blocks.append(new_block)
     return blocks
 
 

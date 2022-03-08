@@ -12,7 +12,7 @@ from scipy.spatial import ConvexHull
 
 from .meshing.surface_mesh_parameters import default_surface_mesh_parameter
 from .face import Face
-from .tools import export_objects, add_radius_to_edges, vector_to_np_array, perpendicular_vector, extrude, create_pipe
+from .tools import export_objects, add_radius_to_edges, vector_to_np_array, perpendicular_vector, extrude, create_pipe, create_pipe_wire, add_radius_to_edges
 
 from .logger import logger
 
@@ -311,7 +311,7 @@ class Solid(object):
         doc.saveCopy(filename)
 
     def __repr__(self):
-        rep = f'Solid {self.name} {self.id} {self.area}'
+        rep = f'Solid {self.name} {self.id} {self.Volume}'
         return rep
 
 
@@ -323,7 +323,7 @@ class PipeSolid(Solid):
         self.name = kwargs.get('name', None)
 
         self.reference_face = kwargs.get('reference_face', None)
-        self.reference_edge_id = kwargs.get('reference_edge_id', 0.02)
+        self.reference_edge_id = kwargs.get('reference_edge_id', 0)
 
         self.tube_diameter = kwargs.get('tube_diameter', 0.02)
         self.tube_distance = kwargs.get('tube_distance', 0.50)
@@ -332,7 +332,9 @@ class PipeSolid(Solid):
         self.bending_radius = kwargs.get('bending_radius', 0.05)
 
         self.reference_edge = None
-        self._pipe_wire = None
+        self._initial_pipe_wire = None  # pipe wire without radius
+        self._pipe_wire = None          # pipe wire with radius
+        self._horizontal_lines = None
 
         try:
             pipe = self.generate_solid()
@@ -349,6 +351,12 @@ class PipeSolid(Solid):
         Solid.__init__(self, *args, **kwargs)
 
     @property
+    def initial_pipe_wire(self):
+        if self._initial_pipe_wire is None:
+            self._initial_pipe_wire, _ = self.generate_initial_pipe_wire()
+        return self._initial_pipe_wire
+
+    @property
     def pipe_wire(self):
         if self._pipe_wire is None:
             self.pipe_wire = self.generate_pipe_wire()
@@ -362,206 +370,228 @@ class PipeSolid(Solid):
     def length(self):
         return self.pipe_wire.Length
 
-    def generate_pipe_wire(self):
-
-        from .tools import project_point_on_line
+    def generate_initial_pipe_wire(self):
+        pipe_wire, self._horizontal_lines = create_pipe_wire(self.reference_face.reference_face,
+                                                             self.reference_edge_id,
+                                                             self.tube_distance,
+                                                             self.tube_edge_distance,
+                                                             self.bending_radius,
+                                                             self.tube_diameter
+                                                             )
 
         reference_face = self.reference_face.reference_face
-
         self.reference_edge = reference_face.Edges[self.reference_edge_id]
         normal = self.reference_face.get_normal(Base.Vector(self.reference_edge.Vertexes[0].X,
                                                             self.reference_edge.Vertexes[0].Y,
                                                             self.reference_edge.Vertexes[0].Z))
-        tube_main_dir = self.reference_edge.Curve.Direction.cross(normal)
+        pipe_wire.Placement.move(self.reference_face.layer_dir * normal *
+                                 (- self.reference_face.component_construction.side_1_offset +
+                                  self.reference_face.tube_side_1_offset))
 
-        offset = -self.tube_edge_distance
-        wires = []
-        offset_possible = True
+        return pipe_wire, self._horizontal_lines
 
-        while offset_possible:
-            try:
-                wire = reference_face.OuterWire.makeOffset2D(offset, join=1, openResult=False, intersection=False)
+    def generate_pipe_wire(self):
 
-                # check if another is possible (return wire)
-                try:
-                    reference_face.OuterWire.makeOffset2D(offset - self.tube_distance, join=1, openResult=False,
-                                                          intersection=False)
-                    wires.append(wire)
-                    offset = offset - 2 * self.tube_distance
-                except Exception as e:
-                    logger.debug(f'no further wire generation possible{e}')
-                    offset_possible = False
-            except Exception as e:
-                logger.debug(f'no further wire generation possible{e}')
-                offset_possible = False
+        return add_radius_to_edges(self.initial_pipe_wire, self.bending_radius)
 
-        # check if last circle is possible:
-        # try:
-        #     last_wire = reference_face.OuterWire.makeOffset2D(offset, join=1, openResult=False, intersection=False)
-        # except Exception as e:
-        #     last_wire = None
-        #     logger.debug(f'no further wire generation possible{e}')
-
-        last_wire = None
-
-        # export_objects([*wires, last_wire], '/tmp/initial_wires2.FCStd')
-
-        pipe_edges = []
-
-        if (reference_face.Edges.__len__() - 1) >= (self.reference_edge_id + 1):
-            start_edge_id = self.reference_edge_id + 1
-        else:
-            start_edge_id = 0
-
-        # create inflow
-        V1 = wires[0].Edges[start_edge_id].Vertex1.Point + tube_main_dir * 2 * self.tube_edge_distance
-        V2 = wires[0].Edges[start_edge_id].Vertex1.Point + tube_main_dir * 1 * self.tube_edge_distance
-        pipe_edges.append(FCPart.LineSegment(V1, V2).toShape())
-
-        V1 = wires[0].Edges[start_edge_id].Vertex1.Point + tube_main_dir * 1 * self.tube_edge_distance
-        V2 = wires[0].Edges[start_edge_id].Vertex1.Point
-        pipe_edges.append(FCPart.LineSegment(V1, V2).toShape())
-
-        # add edges except the start_edge
-        pipe_edges.extend(wires[0].Edges[self.reference_edge_id + 1:])
-        pipe_edges.extend(wires[0].Edges[0:self.reference_edge_id:])
-
-        # modify reference_edge_id edge
-        p1 = wires[0].Edges[self.reference_edge_id].Vertex1.Point
-        p2 = wires[0].Edges[self.reference_edge_id].Vertex2.Point
-        v1 = p1
-        v2 = p2 - 2 * (p2 - p1).normalize() * self.tube_distance
-        pipe_edges.append(FCPart.LineSegment(v1, v2).toShape())
-
-        # export_objects(pipe_edges, '/tmp/pipe_edges7.FCStd')
-        # export_wire([self.reference_face.OuterWire, *pipe_edges])
-        # export_objects(wires, '/tmp/wires.FCStd')
-
-        i = 1
-        while i <= (wires.__len__() - 1):
-            # create connection from previous wire to current wire:
-            dir1 = (wires[i].Edges[start_edge_id].Vertex1.Point - pipe_edges[-1].Vertex2.Point).normalize()
-            dir2 = (wires[i].Edges[start_edge_id].Vertexes[1].Point - pipe_edges[-1].Vertex2.Point).normalize()
-
-            if sum(abs(abs(dir1) - abs(dir2))) < 1e-10:
-                # export_objects([wires[i].Edges[start_edge_id]], '/tmp/pipe_edges6.FCStd')
-                pipe_edges.append(FCPart.LineSegment(pipe_edges[-1].Vertex2.Point,
-                                                     wires[i].Edges[start_edge_id].Vertexes[0].Point).toShape())
-                pipe_edges.append(wires[i].Edges[start_edge_id])
-                # pipe_edges.append(FCPart.LineSegment(pipe_edges[-1].Vertex2.Point,
-                #                                      wires[i].Edges[start_edge_id].Vertexes[1].Point).toShape())
-            else:
-                projected_point = FreeCAD.Base.Vector(
-                    project_point_on_line(point=wires[i].Edges[start_edge_id].Vertex1.Point, line=pipe_edges[-1]))
-
-                # change_previous end edge:
-                pipe_edges[-1] = FCPart.LineSegment(pipe_edges[-1].Vertex1.Point, projected_point).toShape()
-
-                pipe_edges.append(FCPart.LineSegment(wires[i].Edges[start_edge_id].Vertex1.Point,
-                                                     projected_point).toShape())
-                pipe_edges.append(wires[i].Edges[start_edge_id])
-
-            # #pipe_edges.append(FCPart.LineSegment(v1, v2).toShape())
-            #
-            # pipe_edges.append(FCPart.LineSegment(pipe_edges[-1].Vertex2.Point,
-            #                                      wires[i].Edges[start_edge_id].Vertexes[1].Point).toShape())
-
-            # add other edges except start_edge
-            pipe_edges.extend(wires[i].Edges[self.reference_edge_id + 2:])
-            pipe_edges.extend(wires[i].Edges[0:self.reference_edge_id:])
-
-            # modify reference_edge_id edge
-            p1 = wires[i].Edges[self.reference_edge_id].Vertex1.Point
-            p2 = wires[i].Edges[self.reference_edge_id].Vertex2.Point
-            v1 = p1
-            v2 = p2 - 2 * (p2 - p1).normalize() * self.tube_distance
-            pipe_edges.append(FCPart.LineSegment(v1, v2).toShape())
-
-            i = i + 1
-
-        # export_objects(pipe_edges, '/tmp/all_edges_io4.FCStd')
-        # export_objects(wire_out_edges, '/tmp/all_edges_io2.FCStd')
-        # export_objects([wire_in], '/tmp/wire_in.FCStd')
-        # export_objects([wire_out], '/tmp/wire_out9.FCStd')
-        # export_objects([last_wire], '/tmp/last_wire.FCStd')
-        # export_objects([wire_in, wire_out], '/tmp/wires.FCStd')
-
-        # create
-        succeeded = False
-        while not succeeded:
-            wire_in = FCPart.Wire(pipe_edges)
-            wire_out = wire_in.makeOffset2D(-self.tube_distance,
-                                            join=0,
-                                            openResult=True,
-                                            intersection=True,
-                                            fill=False)
-            # wire_in.distToShape(wire_out)
-
-            if last_wire is not None:
-                wire_in_edges = pipe_edges
-
-                dir1 = (last_wire.Edges[start_edge_id].Vertex1.Point - pipe_edges[-1].Vertex2.Point).normalize()
-                dir2 = (last_wire.Edges[start_edge_id].Vertexes[1].Point - pipe_edges[-1].Vertex2.Point).normalize()
-
-                if sum(abs(abs(dir1) - abs(dir2))) < 1e-10:
-                    wire_in_edges.append(FCPart.LineSegment(wire_in_edges[-1].Vertex2.Point,
-                                                            last_wire.Edges[start_edge_id].Vertexes[1].Point).toShape())
-                else:
-                    projected_point = FreeCAD.Base.Vector(
-                        project_point_on_line(point=last_wire.Edges[start_edge_id].Vertex1.Point, line=wire_in_edges[-1]))
-
-                    # change_previous end edge:
-                    wire_in_edges[-1] = FCPart.LineSegment(wire_in_edges[-1].Vertex1.Point, projected_point).toShape()
-
-                    wire_in_edges.append(FCPart.LineSegment(last_wire.Edges[start_edge_id].Vertex1.Point,
-                                                         projected_point).toShape())
-                    wire_in_edges.append(wires[i].Edges[start_edge_id])
-
-                last_wire_edges = last_wire.Edges
-                start_edge = last_wire.Edges[start_edge_id - 1]
-                # del last_wire_edges[start_edge_id - 1]
-                # del last_wire_edges[start_edge_id - 1]
-                last_wire_edges.append(start_edge.split(start_edge.LastParameter - self.tube_distance).SubShapes[0])
-                # wire_in_edges.extend(last_wire_edges)
-                wire_in_edges.extend(last_wire_edges[self.reference_edge_id + 1:])
-                wire_in_edges.extend(last_wire_edges[0:self.reference_edge_id:])
-                wire_in = FCPart.Wire(wire_in_edges)
-
-                # cut last wire out edge:
-                wire_out_edges = wire_out.Edges
-                wire_out_edges[-1] = wire_out_edges[-1].split(wire_out_edges[-1].LastParameter -
-                                                              self.tube_distance).SubShapes[0]
-
-                wire_out = FCPart.Wire(wire_out_edges)
-
-            # create connection between wire_in and wire_out:
-            v1 = wire_in.Edges[-1].Vertex2.Point
-            v2 = wire_out.Edges[-1].Vertex2.Point
-            connection_edge = FCPart.LineSegment(v1, v2).toShape()
-
-            edges_out = wire_out.Edges
-            edges_out.reverse()
-
-            all_edges = [*wire_in.Edges, connection_edge, *edges_out]
-
-            try:
-                FCPart.Wire(all_edges, intersection=False)
-                succeeded = True
-            except Exception as e:
-                succeeded = False
-                del pipe_edges[-1]
-
-        if self.bending_radius is not None:
-            all_edges = add_radius_to_edges(FCPart.Wire(all_edges).OrderedEdges, self.bending_radius)
-
-        pipe_wire = FCPart.Wire(all_edges)
-
-        pipe_wire.Placement.move(
-            self.reference_face.layer_dir * normal * (- self.reference_face.component_construction.side_1_offset + self.reference_face.tube_side_1_offset))
-
-        pipe_wire.Edges[0].reverse()
-
-        return FCPart.Wire(pipe_wire.OrderedEdges)
+        # from .tools import project_point_on_line
+        #
+        # reference_face = self.reference_face.reference_face
+        #
+        # self.reference_edge = reference_face.Edges[self.reference_edge_id]
+        # normal = self.reference_face.get_normal(Base.Vector(self.reference_edge.Vertexes[0].X,
+        #                                                     self.reference_edge.Vertexes[0].Y,
+        #                                                     self.reference_edge.Vertexes[0].Z))
+        # tube_main_dir = self.reference_edge.Curve.Direction.cross(normal)
+        #
+        # offset = -self.tube_edge_distance
+        # wires = []
+        # offset_possible = True
+        #
+        # while offset_possible:
+        #     try:
+        #         wire = reference_face.OuterWire.makeOffset2D(offset, join=1, openResult=False, intersection=False)
+        #
+        #         # check if another is possible (return wire)
+        #         try:
+        #             reference_face.OuterWire.makeOffset2D(offset - self.tube_distance, join=1, openResult=False,
+        #                                                   intersection=False)
+        #             wires.append(wire)
+        #             offset = offset - 2 * self.tube_distance
+        #         except Exception as e:
+        #             logger.debug(f'no further wire generation possible{e}')
+        #             offset_possible = False
+        #     except Exception as e:
+        #         logger.debug(f'no further wire generation possible{e}')
+        #         offset_possible = False
+        #
+        # # check if last circle is possible:
+        # # try:
+        # #     last_wire = reference_face.OuterWire.makeOffset2D(offset, join=1, openResult=False, intersection=False)
+        # # except Exception as e:
+        # #     last_wire = None
+        # #     logger.debug(f'no further wire generation possible{e}')
+        #
+        # last_wire = None
+        #
+        # # export_objects([*wires, last_wire], '/tmp/initial_wires2.FCStd')
+        #
+        # pipe_edges = []
+        #
+        # if (reference_face.Edges.__len__() - 1) >= (self.reference_edge_id + 1):
+        #     start_edge_id = self.reference_edge_id + 1
+        # else:
+        #     start_edge_id = 0
+        #
+        # # create inflow
+        # V1 = wires[0].Edges[start_edge_id].Vertex1.Point + tube_main_dir * 2 * self.tube_edge_distance
+        # V2 = wires[0].Edges[start_edge_id].Vertex1.Point + tube_main_dir * 1 * self.tube_edge_distance
+        # pipe_edges.append(FCPart.LineSegment(V1, V2).toShape())
+        #
+        # V1 = wires[0].Edges[start_edge_id].Vertex1.Point + tube_main_dir * 1 * self.tube_edge_distance
+        # V2 = wires[0].Edges[start_edge_id].Vertex1.Point
+        # pipe_edges.append(FCPart.LineSegment(V1, V2).toShape())
+        #
+        # # add edges except the start_edge
+        # pipe_edges.extend(wires[0].Edges[self.reference_edge_id + 1:])
+        # pipe_edges.extend(wires[0].Edges[0:self.reference_edge_id:])
+        #
+        # # modify reference_edge_id edge
+        # p1 = wires[0].Edges[self.reference_edge_id].Vertex1.Point
+        # p2 = wires[0].Edges[self.reference_edge_id].Vertex2.Point
+        # v1 = p1
+        # v2 = p2 - 2 * (p2 - p1).normalize() * self.tube_distance
+        # pipe_edges.append(FCPart.LineSegment(v1, v2).toShape())
+        #
+        # # export_objects(pipe_edges, '/tmp/pipe_edges7.FCStd')
+        # # export_wire([self.reference_face.OuterWire, *pipe_edges])
+        # # export_objects(wires, '/tmp/wires.FCStd')
+        #
+        # i = 1
+        # while i <= (wires.__len__() - 1):
+        #     # create connection from previous wire to current wire:
+        #     dir1 = (wires[i].Edges[start_edge_id].Vertex1.Point - pipe_edges[-1].Vertex2.Point).normalize()
+        #     dir2 = (wires[i].Edges[start_edge_id].Vertexes[1].Point - pipe_edges[-1].Vertex2.Point).normalize()
+        #
+        #     if sum(abs(abs(dir1) - abs(dir2))) < 1e-10:
+        #         # export_objects([wires[i].Edges[start_edge_id]], '/tmp/pipe_edges6.FCStd')
+        #         pipe_edges.append(FCPart.LineSegment(pipe_edges[-1].Vertex2.Point,
+        #                                              wires[i].Edges[start_edge_id].Vertexes[0].Point).toShape())
+        #         pipe_edges.append(wires[i].Edges[start_edge_id])
+        #         # pipe_edges.append(FCPart.LineSegment(pipe_edges[-1].Vertex2.Point,
+        #         #                                      wires[i].Edges[start_edge_id].Vertexes[1].Point).toShape())
+        #     else:
+        #         projected_point = FreeCAD.Base.Vector(
+        #             project_point_on_line(point=wires[i].Edges[start_edge_id].Vertex1.Point, line=pipe_edges[-1]))
+        #
+        #         # change_previous end edge:
+        #         pipe_edges[-1] = FCPart.LineSegment(pipe_edges[-1].Vertex1.Point, projected_point).toShape()
+        #
+        #         pipe_edges.append(FCPart.LineSegment(wires[i].Edges[start_edge_id].Vertex1.Point,
+        #                                              projected_point).toShape())
+        #         pipe_edges.append(wires[i].Edges[start_edge_id])
+        #
+        #     # #pipe_edges.append(FCPart.LineSegment(v1, v2).toShape())
+        #     #
+        #     # pipe_edges.append(FCPart.LineSegment(pipe_edges[-1].Vertex2.Point,
+        #     #                                      wires[i].Edges[start_edge_id].Vertexes[1].Point).toShape())
+        #
+        #     # add other edges except start_edge
+        #     pipe_edges.extend(wires[i].Edges[self.reference_edge_id + 2:])
+        #     pipe_edges.extend(wires[i].Edges[0:self.reference_edge_id:])
+        #
+        #     # modify reference_edge_id edge
+        #     p1 = wires[i].Edges[self.reference_edge_id].Vertex1.Point
+        #     p2 = wires[i].Edges[self.reference_edge_id].Vertex2.Point
+        #     v1 = p1
+        #     v2 = p2 - 2 * (p2 - p1).normalize() * self.tube_distance
+        #     pipe_edges.append(FCPart.LineSegment(v1, v2).toShape())
+        #
+        #     i = i + 1
+        #
+        # # export_objects(pipe_edges, '/tmp/all_edges_io4.FCStd')
+        # # export_objects(wire_out_edges, '/tmp/all_edges_io2.FCStd')
+        # # export_objects([wire_in], '/tmp/wire_in.FCStd')
+        # # export_objects([wire_out], '/tmp/wire_out9.FCStd')
+        # # export_objects([last_wire], '/tmp/last_wire.FCStd')
+        # # export_objects([wire_in, wire_out], '/tmp/wires.FCStd')
+        #
+        # # create
+        # succeeded = False
+        # while not succeeded:
+        #     wire_in = FCPart.Wire(pipe_edges)
+        #     wire_out = wire_in.makeOffset2D(-self.tube_distance,
+        #                                     join=0,
+        #                                     openResult=True,
+        #                                     intersection=True,
+        #                                     fill=False)
+        #     # wire_in.distToShape(wire_out)
+        #
+        #     if last_wire is not None:
+        #         wire_in_edges = pipe_edges
+        #
+        #         dir1 = (last_wire.Edges[start_edge_id].Vertex1.Point - pipe_edges[-1].Vertex2.Point).normalize()
+        #         dir2 = (last_wire.Edges[start_edge_id].Vertexes[1].Point - pipe_edges[-1].Vertex2.Point).normalize()
+        #
+        #         if sum(abs(abs(dir1) - abs(dir2))) < 1e-10:
+        #             wire_in_edges.append(FCPart.LineSegment(wire_in_edges[-1].Vertex2.Point,
+        #                                                     last_wire.Edges[start_edge_id].Vertexes[1].Point).toShape())
+        #         else:
+        #             projected_point = FreeCAD.Base.Vector(
+        #                 project_point_on_line(point=last_wire.Edges[start_edge_id].Vertex1.Point, line=wire_in_edges[-1]))
+        #
+        #             # change_previous end edge:
+        #             wire_in_edges[-1] = FCPart.LineSegment(wire_in_edges[-1].Vertex1.Point, projected_point).toShape()
+        #
+        #             wire_in_edges.append(FCPart.LineSegment(last_wire.Edges[start_edge_id].Vertex1.Point,
+        #                                                  projected_point).toShape())
+        #             wire_in_edges.append(wires[i].Edges[start_edge_id])
+        #
+        #         last_wire_edges = last_wire.Edges
+        #         start_edge = last_wire.Edges[start_edge_id - 1]
+        #         # del last_wire_edges[start_edge_id - 1]
+        #         # del last_wire_edges[start_edge_id - 1]
+        #         last_wire_edges.append(start_edge.split(start_edge.LastParameter - self.tube_distance).SubShapes[0])
+        #         # wire_in_edges.extend(last_wire_edges)
+        #         wire_in_edges.extend(last_wire_edges[self.reference_edge_id + 1:])
+        #         wire_in_edges.extend(last_wire_edges[0:self.reference_edge_id:])
+        #         wire_in = FCPart.Wire(wire_in_edges)
+        #
+        #         # cut last wire out edge:
+        #         wire_out_edges = wire_out.Edges
+        #         wire_out_edges[-1] = wire_out_edges[-1].split(wire_out_edges[-1].LastParameter -
+        #                                                       self.tube_distance).SubShapes[0]
+        #
+        #         wire_out = FCPart.Wire(wire_out_edges)
+        #
+        #     # create connection between wire_in and wire_out:
+        #     v1 = wire_in.Edges[-1].Vertex2.Point
+        #     v2 = wire_out.Edges[-1].Vertex2.Point
+        #     connection_edge = FCPart.LineSegment(v1, v2).toShape()
+        #
+        #     edges_out = wire_out.Edges
+        #     edges_out.reverse()
+        #
+        #     all_edges = [*wire_in.Edges, connection_edge, *edges_out]
+        #
+        #     try:
+        #         FCPart.Wire(all_edges, intersection=False)
+        #         succeeded = True
+        #     except Exception as e:
+        #         succeeded = False
+        #         del pipe_edges[-1]
+        #
+        # if self.bending_radius is not None:
+        #     all_edges = add_radius_to_edges(FCPart.Wire(all_edges).OrderedEdges, self.bending_radius)
+        #
+        # pipe_wire = FCPart.Wire(all_edges)
+        #
+        # pipe_wire.Placement.move(
+        #     self.reference_face.layer_dir * normal * (- self.reference_face.component_construction.side_1_offset + self.reference_face.tube_side_1_offset))
+        #
+        # pipe_wire.Edges[0].reverse()
+        #
+        # return FCPart.Wire(pipe_wire.OrderedEdges)
 
     def generate_solid(self):
 
@@ -571,6 +601,8 @@ class PipeSolid(Solid):
 
         hull = self.reference_face.plain_reference_face_solid.assembly.hull
         inlet_outlet = hull.fc_solid.Shape.Shells[0].common(pipe_shape)
+
+        export_objects([hull.fc_solid.Shape, pipe_shape], '/tmp/to_intersect.FCStd')
 
         if inlet_outlet.SubShapes.__len__() == 2:
             inlet = Face(fc_face=inlet_outlet.SubShapes[0].removeSplitter(),
@@ -647,3 +679,7 @@ class PipeSolid(Solid):
             FCPart.export(__objs__, filename)
         except Exception as e:
             print(e)
+
+    def __repr__(self):
+        rep = f'Solid {self.name} {self.id}'
+        return rep

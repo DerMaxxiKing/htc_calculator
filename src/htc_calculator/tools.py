@@ -381,6 +381,8 @@ def extrude(path, sections: list, additional_paths=None, occ=False):
 
 def create_pipe(edges, tube_diameter, face_normal):
 
+    export_objects([*edges], '/tmp/tube_edges.FCStd')
+
     inlet = None
     outlet = None
     faces = []
@@ -391,8 +393,9 @@ def create_pipe(edges, tube_diameter, face_normal):
         pipe_profile2 = FCPart.Wire([c2])
         if i == 0:
             inlet = FCPart.Face(pipe_profile1)
+            # export_objects([pipe_profile1, pipe_profile2, inlet, edge, FCPart.Wire(edges)], '/tmp/test3.FCStd')
         if i == edges.__len__() - 1:
-            outlet = FCPart.Face(pipe_profile1)
+            outlet = FCPart.Face(pipe_profile2)
 
         new_faces = extrude(FCPart.Wire([edge]), [pipe_profile1, pipe_profile2], occ=False)
         faces.extend(new_faces.Faces)
@@ -411,7 +414,8 @@ def create_pipe(edges, tube_diameter, face_normal):
 
 def add_radius_to_edges(edges, radius):
 
-    # export_objects(edges, '/tmp/initial_edges.FCStd')
+    if isinstance(edges, FCPart.Wire):
+        edges = edges.OrderedEdges
 
     edges_with_radius = FCPart.Wire(edges[0:1])
 
@@ -424,12 +428,8 @@ def add_radius_to_edges(edges, radius):
 
     def fix_next_problem_edge(c_edges):
 
-        # export_objects([*c_edges], '/tmp/c_edges.FCStd')
-
         new_edges = c_edges
         ordered_vertexes = FCPart.Wire(c_edges).OrderedVertexes
-        # export_objects(ordered_vertexes, '/tmp/ordered_vertexes.FCStd')
-        # export_objects([current_edges[-1], *edges[i:i+5]], '/tmp/ordered_vertexes.FCStd')
 
         edge_dirs = [None] * (ordered_vertexes.__len__() - 1)
         for ii in range(ordered_vertexes.__len__() - 1):
@@ -461,10 +461,7 @@ def add_radius_to_edges(edges, radius):
                     make_fillet([current_test_edge, t_edge], radius=radius) is None]
 
             if any(cond):
-                logger.debug(f'Fixing edge {i}')
-                # new_fillet_edges = make_fillet([current_test_edge, t_edge], radius=radius)
-
-                logger.warning(f'Radius generation not possible')
+                logger.debug(f'Radius generation not possible')
                 problem_edge_indices = i
                 logger.debug(f'Fixing edge {i}')
                 angle1 = angle_between_edges(c_edges[i - 1], c_edges[i], side1=1, side2=0, deg=True)
@@ -485,14 +482,6 @@ def add_radius_to_edges(edges, radius):
                         ordered_vertexes[i + 1].Point + edge_dirs[i + 1] * float(d) / 2).toShape()
 
                 elif edge_dirs[i - 1] == -edge_dirs[i + 1]:
-                    # ip0 = intersect_lines(c_edges[i - 1], c_edges[i + 2], as_vector=True)[0]
-                    # e1 = FCPart.LineSegment(ordered_vertexes[i - 1].Point,
-                    #                         ip0).toShape()
-                    # e2 = FCPart.LineSegment(ip0,
-                    #                         ordered_vertexes[i + 3].Point).toShape()
-                    # new_edges = [*c_edges[0:i], e1, e2, *c_edges[i+2:]]
-
-                    # new approach:
                     rep_wire = FCPart.Wire(c_edges[i-2:i+3])
                     p_proj1, on_segment1 = project_point_on_line(rep_wire.OrderedVertexes[1].Point,
                                                                  rep_wire.OrderedEdges[-2],
@@ -500,10 +489,6 @@ def add_radius_to_edges(edges, radius):
                     p_proj2, on_segment2 = project_point_on_line(rep_wire.OrderedVertexes[-2].Point,
                                                                  rep_wire.OrderedEdges[1],
                                                                  return_on_segment=True)
-
-                    # export_objects([rep_wire,
-                    #                 FCPart.Vertex(Base.Vector(p_proj1)),
-                    #                 FCPart.Vertex(Base.Vector(p_proj2))], '/tmp/rep_wire.FCStd')
 
                     if on_segment1:
                         e0 = FCPart.LineSegment(rep_wire.OrderedVertexes[1].Point, Base.Vector(p_proj1)).toShape()
@@ -543,132 +528,6 @@ def add_radius_to_edges(edges, radius):
             current_edges.extend(new_edges.Shape.OrderedEdges[1:])
             i += 1
         edges_with_radius = FCPart.Wire(current_edges)
-
-    # export_objects([edges_with_radius], '/tmp/edges_with_radius.FCStd')
-
-    # new_edges = edges
-    # for p_edge_index in problem_edge_indices:
-    #     logger.debug(f'Fixing edge {i}')
-    #     angle1 = angle_between_edges(edges[p_edge_index-1], edges[p_edge_index], side1=1, side2=0, deg=True)
-    #     angle2 = angle_between_edges(edges[p_edge_index], edges[p_edge_index + 1], side1=1, side2=0, deg=True)
-    #
-    #     if edge_dirs[p_edge_index-1] == edge_dirs[p_edge_index+1]:
-    #         d = calc_d(edges[p_edge_index].Length, angle1, radius)
-    #         new_edges[p_edge_index-1] = FCPart.LineSegment(ordered_vertexes[p_edge_index].Point,
-    #                                                        ordered_vertexes[p_edge_index+1].Point - edge_dirs[p_edge_index-1] * float(d) / 2).toShape()
-    #         new_edges[p_edge_index] = FCPart.LineSegment(ordered_vertexes[p_edge_index+1].Point - edge_dirs[p_edge_index] * float(d) / 2,
-    #                                                      ordered_vertexes[p_edge_index+2].Point + edge_dirs[p_edge_index] * float(d) / 2).toShape()
-    #         new_edges[p_edge_index + 1] = FCPart.LineSegment(ordered_vertexes[p_edge_index+2].Point + edge_dirs[p_edge_index+1] * float(d) / 2,
-    #                                                          ordered_vertexes[p_edge_index+3].Point).toShape()
-    #     elif edge_dirs[p_edge_index-1] == -edge_dirs[p_edge_index+1]:
-    #
-    #             ip0 = intersect_lines(edges[p_edge_index-1], edges[p_edge_index+2], as_vector=True)[0]
-    #             e1 = FCPart.LineSegment(ordered_vertexes[p_edge_index-1].Point,
-    #                                     ip0).toShape()
-    #             e2 = FCPart.LineSegment(ip0,
-    #                                     ordered_vertexes[p_edge_index+3].Point).toShape()
-    #
-    #
-    # # e_wire = FCPart.Wire(edges)
-    # # wire1 = Draft.make_wire(e_wire, closed=False)
-    # # wire1.recompute()
-    # # wire1.FilletRadius = radius
-    # # wire1.recompute()
-    # #
-    # # export_objects([wire1.Shape], '/tmp/radius_test.FCStd')
-    #
-    # i = 1
-    # while i < edges.__len__():
-    #
-    #     current_edges = edges_with_radius.OrderedEdges
-    #
-    #     # dir1 = vector_to_np_array(current_edges[-1].tangentAt(current_edges[-1].LastParameter))
-    #     # dir2 = vector_to_np_array(edges[i].tangentAt(edges[i].LastParameter))
-    #     remaining_edges = edges.__len__() - i - 1
-    #     select_id = 5
-    #     if remaining_edges < 5:
-    #         select_id = remaining_edges
-    #     ordered_vertexes = FCPart.Wire([current_edges[-1], *edges[i:i+select_id]]).OrderedVertexes
-    #     # export_objects(ordered_vertexes, '/tmp/ordered_vertexes.FCStd')
-    #     # export_objects([current_edges[-1], *edges[i:i+5]], '/tmp/ordered_vertexes.FCStd')
-    #
-    #     edge_dirs = [None] * (ordered_vertexes.__len__() - 1)
-    #     for ii in range(ordered_vertexes.__len__() - 1):
-    #         vec = ordered_vertexes[ii+1].Point - ordered_vertexes[ii].Point
-    #         edge_dirs[ii] = vec / np.linalg.norm(vec)
-    #
-    #     angles = [None] * (ordered_vertexes.__len__() - 2)
-    #     for ii in range(ordered_vertexes.__len__() - 2):
-    #         angles[ii] = angle_between_vertices(ordered_vertexes[ii+1].Point,
-    #                                             ordered_vertexes[ii].Point,
-    #                                             ordered_vertexes[ii+2].Point)
-    #
-    #     # check if distance to parallel edges is large enough for radius
-    #     # for ii, edge in enumerate(edges[i:i+select_id]):
-    #     #     if edge_dirs[ii] == -edge_dirs[0]:
-    #     #         if current_edges[-1].distToShape(edge)[0] < (2 * radius):
-    #     #             logger.warning(f'Warning: Distance between edges smaller than 2*radius')
-    #     #             current_t_edge = current_edges[-1]
-    #     #             for t_edge in edges[i:i+ii]:
-    #     #                 new_edges = make_fillet([current_t_edge, t_edge], radius=radius)
-    #     #                 if new_edges is None:
-    #     #                     logger.warning(f'Radius generation not possible')
-    #     #                 current_t_edge = t_edge
-    #
-    #     if any(abs(np.array([0, 180]) - abs(angles[0])) < 1e-3):
-    #         current_edges.append(edges[i])
-    #         edges_with_radius = FCPart.Wire(FCPart.sortEdges(current_edges)[0])
-    #         i += 1
-    #         continue
-    #     else:
-    #
-    #         l_min1 = radius / np.tan(np.deg2rad(abs(angles[0]/2))) - 1e-6
-    #         l_min2 = 0
-    #         if angles.__len__() > 1:
-    #             l_min2 = radius / np.tan(np.deg2rad(abs(angles[1]/2))) - 1e-6
-    #         if edges[i].Length < (l_min1+l_min2):
-    #             if edge_dirs[2] == -edge_dirs[0]:
-    #                 new_edges = make_custom_fillet(current_edges[-1], edges[i+2], radius)
-    #                 if new_edges is not None:
-    #                     current_edges[-1] = new_edges.Shape.OrderedEdges[0]
-    #                     current_edges.extend(new_edges.Shape.OrderedEdges[1:])
-    #                     i += 3
-    #                 else:
-    #                     raise Exception('Error!')
-    #             elif edge_dirs[2] == edge_dirs[0]:
-    #                 dist = edges[i].Length
-    #                 d = calc_d(edges[i].Length, angles[0], radius)
-    #                 # connect edges diagonal:
-    #                 current_edges[-1] = FCPart.LineSegment(ordered_vertexes[0].Point,
-    #                                                        ordered_vertexes[1].Point - edge_dirs[0] * float(d) / 2).toShape()
-    #                 edges[i] = FCPart.LineSegment(ordered_vertexes[1].Point - edge_dirs[0] * float(d) / 2,
-    #                                               ordered_vertexes[2].Point + edge_dirs[0] * float(d) / 2).toShape()
-    #                 edges[i+1] = FCPart.LineSegment(ordered_vertexes[2].Point + edge_dirs[0] * float(d) / 2,
-    #                                                 ordered_vertexes[3].Point).toShape()
-    #                 new_edges = make_fillet([current_edges[-1], edges[i]], radius=radius)
-    #                 if new_edges is not None:
-    #                     current_edges[-1] = new_edges.Shape.OrderedEdges[0]
-    #                     current_edges.extend(new_edges.Shape.OrderedEdges[1:])
-    #                     i += 1
-    #         else:
-    #             new_edges = make_fillet([current_edges[-1], edges[i]], radius=radius)
-    #             if new_edges is not None:
-    #                 current_edges[-1] = new_edges.Shape.OrderedEdges[0]
-    #                 current_edges.extend(new_edges.Shape.OrderedEdges[1:])
-    #                 i += 1
-    #             else:
-    #                 raise Exception('Error!')
-    #
-    #         FCPart.sortEdges(current_edges)
-    #         edges_with_radius = FCPart.Wire(FCPart.sortEdges(current_edges)[0])
-    #
-    #
-    #
-    # # export_objects([*current_edges, *new_edges.Shape.Edges], '/tmp/edges2.FCStd')
-    # # export_objects(current_edges, '/tmp/edges8.FCStd')
-    # # export_objects(edges_with_radius.OrderedEdges, '/tmp/edges_with_radius.FCStd')
-    # # export_objects(edges, '/tmp/next_edge2.FCStd')
-    # # export_objects([edges_with_radius[-1], edges[i]], '/tmp/next_edge2.FCStd')
 
     return edges_with_radius
 
@@ -960,7 +819,7 @@ def create_pipe_wire(reference_face,
                         # pipe_wire
                         # ], '/tmp/h_lines.FCStd')
 
-        return pipe_wire
+        return pipe_wire, horizontal_lines
 
     elif layout == 'Concentric':
         pipe_wire = None
@@ -1093,6 +952,20 @@ def angle_between_edges(edge1: FCPart.Edge,
     return np.rad2deg(angle)
 
 
+def angle_between_vectors(v1: Base.Vector,
+                          v2: Base.Vector,
+                          normal: Base.Vector = None,
+                          deg=True):
+
+    if normal is None:
+        angle = DraftVecUtils.angle(v1.normalize(), v2.normalize())
+    else:
+        angle = DraftVecUtils.angle(v1.normalize(), v2.normalize(), normal)
+    if not deg:
+        return angle
+    return np.rad2deg(angle)
+
+
 def make_custom_fillet(edge1, edge2, radius, side1=1, side2=0):
 
     params1 = [edge1.FirstParameter, edge1.LastParameter]
@@ -1121,3 +994,32 @@ def calc_d(l_e, beta, radius):
 
     d = fsolve(func, np.array(0))
     return abs(d)
+
+
+def split_wire_by_projected_vertices(wire, vertices, dist, ensure_closed=False):
+    cutted_ref_face_edges = []
+    for edge in wire.OrderedEdges:
+        edge_parameters = [edge.FirstParameter, edge.LastParameter]
+        split_parameters = []
+        for vertex in vertices:
+            if vertex.distToShape(edge)[0] <= dist:
+                parameter = edge.Curve.parameter(Base.Vector(project_point_on_line(vertex.Point, edge)))
+                if (parameter not in edge_parameters) and (edge.FirstParameter < parameter < edge.LastParameter):
+                    split_parameters.append(parameter)
+        split_parameters = sorted(list(set(split_parameters)))
+
+        try:
+            cutted_ref_face_edges.extend(edge.split(split_parameters).Edges)
+        except Exception as e:
+            raise e
+
+    sorted_edges = FCPart.sortEdges(cutted_ref_face_edges)[0]
+
+    if ensure_closed:
+        wire = FCPart.Wire(sorted_edges)
+        if not wire.isClosed():
+            return FCPart.Wire([*wire.OrderedEdges,
+                                FCPart.LineSegment(wire.OrderedVertexes[-1].Point, wire.OrderedVertexes[0].Point).toShape()])
+
+    else:
+        return FCPart.Wire(sorted_edges)

@@ -4,9 +4,9 @@ from .reference_face import ReferenceFace
 from .tools import project_point_on_line, export_objects
 from .face import Face
 from .solid import Solid, PipeSolid
-from .meshing.block_mesh import BlockMeshVertex, BlockMeshEdge, Block, create_o_grid_blocks, create_blocks_from_2d_mesh
+from .meshing.block_mesh import BlockMeshVertex, BlockMeshEdge, Block, create_o_grid_blocks, create_blocks_from_2d_mesh, BlockMeshBoundary, BlockMesh
 from .logger import logger
-from .tools import export_objects
+from .tools import export_objects, split_wire_by_projected_vertices
 
 import FreeCAD
 import Part as FCPart
@@ -45,8 +45,22 @@ class ActivatedReferenceFace(ReferenceFace):
         self.reference_edge = None
         # self.pipe_wire = None
         self._pipe = None
+        self._pipe_blocks = None
+        self._free_blocks = None
 
         self.integrate_pipe()
+
+    @property
+    def pipe_blocks(self):
+        if self._pipe_blocks is None:
+            self._pipe_blocks = self.create_o_grid()
+        return self._pipe_blocks
+
+    @property
+    def free_blocks(self):
+        if self._free_blocks is None:
+            self._free_blocks = self.create_free_blocks()
+        return self._free_blocks
 
     def integrate_pipe(self):
         self.pipe = PipeSolid(reference_face=self,
@@ -280,7 +294,14 @@ class ActivatedReferenceFace(ReferenceFace):
                 new_blocks = create_o_grid_blocks(edge, self, outer_pipe=outer_pipe, inlet=inlet, outlet=outlet)
                 blocks.append(new_blocks)
 
-        Block.save_fcstd('/tmp/blocks.FCStd')
+        logger.info(f'Finished Pipe Block generation successfully\n\n')
+
+        # Block.save_fcstd('/tmp/blocks.FCStd')
+        return blocks
+
+    def create_free_blocks(self):
+
+        logger.info(f'Creating free block mesh for {self.name}, {self.id}')
 
         # comp_solid = Block.comp_solid
 
@@ -288,36 +309,40 @@ class ActivatedReferenceFace(ReferenceFace):
         mv_vec = self.layer_dir * self.normal * (- self.component_construction.side_1_offset + self.tube_side_1_offset)
 
         ref_face = self.reference_face.copy()
-
-        edges = []
-        for i, edge in enumerate(ref_face.OuterWire.Edges):
-            if i == self.reference_edge_id:
-                new_edges1 = edge.split(float(edge.FirstParameter + self.tube_edge_distance + self.bending_radius)).Edges
-                edges.append(new_edges1[0])
-                edges.extend(new_edges1[1].split(float(edge.LastParameter - (2 * self.tube_distance + self.tube_edge_distance + self.bending_radius))).Edges)
-            else:
-                new_edges1 = edge.split(float(edge.FirstParameter + self.tube_edge_distance + self.bending_radius)).Edges
-                edges.append(new_edges1[0])
-                edges.extend(new_edges1[1].split(float(edge.LastParameter - self.tube_edge_distance - self.bending_radius)).Edges)
-
-        splitted_wire = FCPart.Wire(edges)
-        ref_face2 = FCPart.Face(splitted_wire).translate(mv_vec)
-        # export_objects(ref_face2.Edges, '/tmp/edges.FCStd')
-
+        ref_face2 = ref_face.translate(mv_vec)
+        logger.info(f'Cutting reference face with pipe wire')
         cutted_face = ref_face2.cut(Block.comp_solid)
-        quad_meshes = [Face(fc_face=x).create_hex_g_mesh(lc=9999999999) for x in cutted_face.SubShapes]
+        splitted_ref_face_wire = split_wire_by_projected_vertices(ref_face2.OuterWire,
+                                                                  cutted_face.SubShapes[0].Vertexes,
+                                                                  self.tube_edge_distance)
+        cutted_ref_face = FCPart.Face(splitted_ref_face_wire).translate(mv_vec)
+        cutted_face = cutted_ref_face.cut(Block.comp_solid)
 
+        # add points to second (inner) face
+        # splitted_inner_face_wire = split_wire_by_projected_vertices(cutted_face.SubShapes[1].OuterWire,
+        #                                                             [],
+        #                                                             3 * self.tube_diameter,
+        #                                                             ensure_closed=True)
+
+        wire = FCPart.Wire(cutted_face.SubShapes[1].OuterWire)
+        if not wire.isClosed():
+            return FCPart.Wire([*wire.OrderedEdges,
+                                FCPart.LineSegment(wire.OrderedVertexes[-1].Point,
+                                                   wire.OrderedVertexes[0].Point).toShape()])
+
+        quad_meshes = [Face(fc_face=x).create_hex_g_mesh(lc=9999999999) for x in [cutted_face.SubShapes[0],
+                                                                                  FCPart.Face(wire)]]
         free_blocks = create_blocks_from_2d_mesh(quad_meshes, self)
 
-        Block.save_fcstd('/tmp/blocks2.FCStd')
+        return free_blocks
 
-        [x.write(f'/tmp/quad_mesh{i}.vtk') for i, x in enumerate(quad_meshes)]
-
-        export_objects([ref_face2, cutted_face], '/tmp/cutted_face.FCStd')
-
-        print('done')
-
-        free_blocks = create_blocks_from_2d_mesh(quad_meshes, self)
+        # Block.save_fcstd('/tmp/blocks2.FCStd')
+        #
+        # export_objects([ref_face, cutted_face], '/tmp/cutted_face.FCStd')
+        #
+        # print('done')
+        #
+        # free_blocks = create_blocks_from_2d_mesh(quad_meshes, self)
 
     # def generate_hole_part(self):
     #
@@ -391,6 +416,27 @@ class ActivatedReferenceFace(ReferenceFace):
         doc.recompute()
         doc.saveCopy(filename)
 
+    def generate_block_mesh_dict(self):
+
+        block_mesh = BlockMesh(name=self.name)
+        block_mesh.init_case()
+
+        # vertices_entry = BlockMeshVertex.block_mesh_entry()
+        # print(vertices_entry)
+        # edges_entry = BlockMeshEdge.block_mesh_entry()
+        # print(edges_entry)
+        # block_entry = Block.block_mesh_entry()
+        # print(block_entry)
+        # boundary_entry = BlockMeshBoundary.block_mesh_entry()
+        # print(boundary_entry)
+
+
+
+
+
+
+
+
     def generate_mesh(self):
         pass
 
@@ -411,6 +457,7 @@ class ActivatedReferenceFace(ReferenceFace):
         doc.recompute()
 
         Block.save_fcstd('/tmp/blocks2.FCStd')
+
 
 def replace(arr, find, replace):
     # fast and readable

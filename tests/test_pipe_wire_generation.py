@@ -68,9 +68,11 @@ def test_add_radius(pipe_wire_list, radius):
 
     radius_pipe_wires = []
 
-    for pipe_wire in pipe_wire_list:
+    for i, pipe_wire in enumerate(pipe_wire_list):
+        print(f'Adding radius to pipe_wire {i}')
         pw_radius = add_radius_to_edges(pipe_wire[0].OrderedEdges, radius)
         radius_pipe_wires.append((pw_radius, pipe_wire[1]))
+        print(f'Added radius to pipe_wire {i} successfully')
         export_objects([pw_radius, pipe_wire[1]], '/tmp/pipe_wire_radius.FCStd')
 
     return radius_pipe_wires
