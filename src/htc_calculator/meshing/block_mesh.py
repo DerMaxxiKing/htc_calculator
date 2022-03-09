@@ -6,6 +6,8 @@ import numpy as np
 from functools import lru_cache, wraps
 from ..logger import logger
 from ..tools import vector_to_np_array, perpendicular_vector, export_objects, angle_between_vectors
+from ..geo_tools import search_contacts, surfaces_in_contact
+import trimesh
 
 import FreeCAD
 import Part as FCPart
@@ -230,9 +232,12 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
 
     @classmethod
     def block_mesh_entry(cls):
-        edge_entries = [None] * cls.instances.values().__len__()
-        for i, edge in enumerate(EdgeMetaMock.instances.values()):
-            edge_entries[i] = '\t' + edge.dict_entry
+
+        edge_entries = ['\t' + x.dict_entry for x in EdgeMetaMock.instances.values() if x.dict_entry is not None]
+
+        # edge_entries = [None] * cls.instances.values().__len__()
+        # for i, edge in enumerate(EdgeMetaMock.instances.values()):
+        #     edge_entries[i] = '\t' + edge.dict_entry
         return f'edges\n(\n' + "\n".join(edge_entries) + '\n);\n'
 
     def __init__(self, *args, **kwargs):
@@ -310,9 +315,13 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
 
     @classmethod
     def block_mesh_entry(cls):
-        boundary_entries = [None] * cls.instances.values().__len__()
-        for i, boundary in enumerate(BoundaryMetaMock.instances.values()):
-            boundary_entries[i] = '\t' + boundary.dict_entry
+        # boundary_entries = [None] * cls.instances.values().__len__()
+
+        boundary_entries = ['\t' + x.dict_entry for x in BoundaryMetaMock.instances.values() if x.dict_entry is not None]
+        # for i, boundary in enumerate(BoundaryMetaMock.instances.values()):
+        #     entry = boundary.dict_entry
+        #     if entry is not None:
+        #         boundary_entries[i] = '\t' + boundary.dict_entry
         return f'boundary\n(\n' + "\n".join(boundary_entries) + '\n);\n'
 
     def __init__(self, *args, **kwargs):
@@ -339,6 +348,10 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
 
     @property
     def dict_entry(self):
+
+        if self.type == 'interface':
+            return None
+
         faces_entry = "\n".join(['\t\t\t(' + ' '.join([str(y.id) for y in x.vertices]) + ')' for x in self.faces])
 
         return (f"\t{self.name}\n"
@@ -480,6 +493,8 @@ class BlockMesh(object):
     @staticmethod
     def create_block_mesh_dict():
 
+        contacts = Block.search_merge_patch_pairs()
+
         logger.info('Creating blockMeshDict...')
 
         template = pkg_resources.read_text(msh_resources, 'block_mesh_dict')
@@ -510,6 +525,7 @@ class BlockMesh(object):
 inlet_patch = BlockMeshBoundary(name='inlet', type='patch')
 outlet_patch = BlockMeshBoundary(name='outlet', type='patch')
 wall_patch = BlockMeshBoundary(name='wall', type='wall')
+pipe_wall_patch = BlockMeshBoundary(name='pipe_wall', type='interface')
 
 
 class BlockMeshFace(object, metaclass=FaceMetaMock):
@@ -528,6 +544,9 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
         self.name = kwargs.get('name', 'unnamed face')
         self.id = next(BlockMeshFace.id_iter)
         self.vertices = kwargs.get('vertices')
+
+        self.merge = kwargs.get('merge', True)
+        self.check_merge_patch_pairs = kwargs.get('check_merge_patch_pairs', True)
 
         self._boundary = kwargs.get('boundary', None)
         self._fc_face = None
@@ -739,9 +758,11 @@ class Block(object, metaclass=BlockMetaMock):
 
     @classmethod
     def block_mesh_entry(cls):
-        block_entries = [None] * cls.instances.__len__()
-        for i, block in enumerate(BlockMetaMock.instances):
-            block_entries[i] = '\t' + block.dict_entry
+
+        block_entries = ['\t' + x.dict_entry for x in BlockMetaMock.instances if x.dict_entry is not None]
+        # block_entries = [None] * cls.instances.__len__()
+        # for i, block in enumerate(BlockMetaMock.instances):
+        #     block_entries[i] = '\t' + block.dict_entry
         return f'blocks\n(\n' + "\n".join(block_entries) + '\n);\n'
 
     @classmethod
@@ -761,6 +782,36 @@ class Block(object, metaclass=BlockMetaMock):
                 raise e
         doc.recompute()
         doc.saveCopy(filename)
+
+    @classmethod
+    def search_merge_patch_pairs(cls):
+        # https://forum.freecadweb.org/viewtopic.php?t=15699&start=130
+        blocks_to_check = [x for x in cls.instances if x.check_merge_patch_pairs]
+
+        merge_faces = []
+
+        for block in blocks_to_check:
+            blocks_to_check.remove(block)
+            if block.check_merge_patch_pairs:
+                for other_block in blocks_to_check:
+                    for s_face in block.faces:
+                        if s_face.blocks.__len__() == 2:
+                            continue
+                        for o_face in other_block.faces:
+                            if o_face.blocks.__len__() == 2:
+                                continue
+                            if o_face is s_face:
+                                continue
+                            dist = s_face.fc_face.distToShape(o_face.fc_face)[0]
+                            if dist < 0.1:
+                                print('comparing')
+                                if surfaces_in_contact(s_face.fc_face, o_face.fc_face):
+                                    merge_faces.append([s_face, o_face])
+                                # export_objects([s_face.fc_face, o_face.fc_face], '/tmp/test.FCStd')
+
+        return merge_faces
+
+
 
     def __init__(self, *args, **kwargs):
         """
@@ -807,6 +858,7 @@ class Block(object, metaclass=BlockMetaMock):
 
         self.non_regular = kwargs.get('non_regular', False)
         self.extruded = kwargs.get('extruded', False)
+        self.check_merge_patch_pairs = kwargs.get('check_merge_patch_pairs', True)
 
         self._face0 = kwargs.get('face0', None)
         self._face1 = kwargs.get('face1', None)
@@ -870,7 +922,7 @@ class Block(object, metaclass=BlockMetaMock):
                 else:
                     corrected_vertices = [*self.vertices[4:], *self.vertices[0:4]]
 
-        return f"hex ({' '.join(['v' + str(x.id) for x in corrected_vertices])}) (10 10 10) simpleGrading (1 1 1)"
+        return f"hex ({' '.join(['v' + str(x.id) for x in corrected_vertices])}) {self.cell_zone} (10 10 10) simpleGrading (1 1 1)"
 
     # @property
     # def center_line(self):
@@ -1459,14 +1511,15 @@ def create_blocks(layer1_vertices,
                           block_edges=block_edges,
                           num_cells=num_cells,
                           cell_zone=cell_zones[i],
-                          extruded=True)
+                          extruded=True,
+                          check_merge_patch_pairs=False)
 
         blocks.append(new_block)
 
-    blocks[1].faces[5].boundary = wall_patch
-    blocks[2].faces[3].boundary = wall_patch
-    blocks[3].faces[4].boundary = wall_patch
-    blocks[4].faces[2].boundary = wall_patch
+    blocks[1].faces[5].boundary = pipe_wall_patch
+    blocks[2].faces[3].boundary = pipe_wall_patch
+    blocks[3].faces[4].boundary = pipe_wall_patch
+    blocks[4].faces[2].boundary = pipe_wall_patch
 
     if outer_pipe:
 
@@ -1511,7 +1564,9 @@ def create_blocks(layer1_vertices,
                               block_edges=block_edges,
                               num_cells=num_cells,
                               cell_zone=outer_cell_zones[i],
-                              extruded=True)
+                              extruded=True,
+                              check_merge_patch_pairs=True
+                              )
             # try:
             #     print(f'Block {new_block.id} volume: {new_block.fc_box.Volume}')
             # except Exception as e:
