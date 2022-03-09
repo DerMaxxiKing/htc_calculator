@@ -1,10 +1,12 @@
 import sys
 import pathlib
+import operator
+import functools
 from .reference_face import ReferenceFace
 from .tools import project_point_on_line, export_objects
 from .face import Face
 from .solid import Solid, PipeSolid
-from .meshing.block_mesh import BlockMeshVertex, BlockMeshEdge, Block, create_o_grid_blocks, create_blocks_from_2d_mesh, BlockMeshBoundary, BlockMesh
+from .meshing.block_mesh import Block, create_o_grid_blocks, create_blocks_from_2d_mesh, BlockMesh, CompBlock
 from .logger import logger
 from .tools import export_objects, split_wire_by_projected_vertices
 
@@ -45,22 +47,22 @@ class ActivatedReferenceFace(ReferenceFace):
         self.reference_edge = None
         # self.pipe_wire = None
         self._pipe = None
-        self._pipe_blocks = None
-        self._free_blocks = None
+        self._pipe_comp_blocks = None
+        self._free_comp_blocks = None
 
         self.integrate_pipe()
 
     @property
-    def pipe_blocks(self):
-        if self._pipe_blocks is None:
-            self._pipe_blocks = self.create_o_grid()
-        return self._pipe_blocks
+    def pipe_comp_blocks(self):
+        if self._pipe_comp_blocks is None:
+            self._pipe_comp_blocks = self.create_o_grid()
+        return self._pipe_comp_blocks
 
     @property
-    def free_blocks(self):
-        if self._free_blocks is None:
-            self._free_blocks = self.create_free_blocks()
-        return self._free_blocks
+    def free_comp_blocks(self):
+        if self._free_comp_blocks is None:
+            self._free_comp_blocks = self.create_free_blocks()
+        return self._free_comp_blocks
 
     def integrate_pipe(self):
         self.pipe = PipeSolid(reference_face=self,
@@ -295,9 +297,13 @@ class ActivatedReferenceFace(ReferenceFace):
                 blocks.append(new_blocks)
 
         logger.info(f'Finished Pipe Block generation successfully\n\n')
+        block_list = functools.reduce(operator.iconcat, blocks, [])
+        pipe_comp_block = CompBlock(name='Pipe Blocks',
+                                    blocks=block_list)
 
         # Block.save_fcstd('/tmp/blocks.FCStd')
-        return blocks
+        # export_objects([pipe_comp_block.fc_solid], '/tmp/pipe_comp_block.FCStd')
+        return pipe_comp_block
 
     def create_free_blocks(self):
 
@@ -311,12 +317,15 @@ class ActivatedReferenceFace(ReferenceFace):
         ref_face = self.reference_face.copy()
         ref_face2 = ref_face.translate(mv_vec)
         logger.info(f'Cutting reference face with pipe wire')
-        cutted_face = ref_face2.cut(Block.comp_solid)
+
+        cutted_face = ref_face2.cut(self.pipe_comp_blocks.fc_solid)
+
+        # cutted_face = ref_face2.cut(Block.comp_solid)
         splitted_ref_face_wire = split_wire_by_projected_vertices(ref_face2.OuterWire,
                                                                   cutted_face.SubShapes[0].Vertexes,
                                                                   self.tube_edge_distance)
         cutted_ref_face = FCPart.Face(splitted_ref_face_wire).translate(mv_vec)
-        cutted_face = cutted_ref_face.cut(Block.comp_solid)
+        cutted_face = cutted_ref_face.cut(self.pipe_comp_blocks.fc_solid)
 
         # add points to second (inner) face
         # splitted_inner_face_wire = split_wire_by_projected_vertices(cutted_face.SubShapes[1].OuterWire,
@@ -334,7 +343,12 @@ class ActivatedReferenceFace(ReferenceFace):
                                                                                   FCPart.Face(wire)]]
         free_blocks = create_blocks_from_2d_mesh(quad_meshes, self)
 
-        return free_blocks
+        free_comp_block = CompBlock(name='Free Blocks',
+                                    blocks=free_blocks)
+
+        export_objects([free_comp_block.fc_solid], '/tmp/free_comp_block.FCStd')
+
+        return free_comp_block
 
         # Block.save_fcstd('/tmp/blocks2.FCStd')
         #
