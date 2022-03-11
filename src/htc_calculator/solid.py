@@ -602,7 +602,7 @@ class PipeSolid(Solid):
         hull = self.reference_face.plain_reference_face_solid.assembly.hull
         inlet_outlet = hull.fc_solid.Shape.Shells[0].common(pipe_shape)
 
-        export_objects([hull.fc_solid.Shape, pipe_shape], '/tmp/to_intersect.FCStd')
+        # export_objects([hull.fc_solid.Shape, pipe_shape], '/tmp/to_intersect.FCStd')
 
         if inlet_outlet.SubShapes.__len__() == 2:
             inlet = Face(fc_face=inlet_outlet.SubShapes[0].removeSplitter(),

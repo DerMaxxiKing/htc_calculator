@@ -1,4 +1,8 @@
 import sys
+import numpy as np
+
+import FreeCAD
+import Part as FCPart
 
 minimum_distance = 0.2                                # Minimum distance between faces for which they are considered in contact
 DetectOnlyFullSurfaceContacts = False                 # Only that faces that have contact between them on a surface whose area is non zero are detected
@@ -9,6 +13,10 @@ Slope = 1000000                         # Contact stiffness
 Friction = 0.3                          # Friction
 
 tangency_error = 0.0001
+
+
+def get_position(vertex: FCPart.Vertex):
+    return np.array([vertex.X, vertex.Y, vertex.Z])
 
 
 def surfaces_in_contact(face_1, face_2):  # Detect if faces are in contact on a surface whose area is not zero

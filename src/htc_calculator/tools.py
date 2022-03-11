@@ -1023,3 +1023,8 @@ def split_wire_by_projected_vertices(wire, vertices, dist, ensure_closed=False):
 
     else:
         return FCPart.Wire(sorted_edges)
+
+
+def array_row_intersection(a, b):
+    tmp = np.prod(np.swapaxes(a[:, :, None], 1, 2) == b, axis=2)
+    return a[np.sum(np.cumsum(tmp, axis=0)*tmp == 1, axis=1).astype(bool)]

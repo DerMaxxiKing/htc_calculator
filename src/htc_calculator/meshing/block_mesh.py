@@ -5,8 +5,8 @@ import itertools
 import numpy as np
 from functools import lru_cache, wraps
 from ..logger import logger
-from ..tools import vector_to_np_array, perpendicular_vector, export_objects, angle_between_vectors
-from ..geo_tools import search_contacts, surfaces_in_contact
+from ..tools import vector_to_np_array, perpendicular_vector, export_objects, angle_between_vectors, array_row_intersection
+from ..geo_tools import search_contacts, surfaces_in_contact, get_position
 import trimesh
 
 import FreeCAD
@@ -15,6 +15,7 @@ import Draft
 from FreeCAD import Base
 import DraftVecUtils
 import PartDesign
+import BOPTools.SplitFeatures
 
 try:
     import importlib.resources as pkg_resources
@@ -271,12 +272,22 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
 
         self._fc_edge = None
         self._collapsed = False
+        self._direction = None
 
         self.vertices[0].edges.add(self)
         self.vertices[1].edges.add(self)
 
         self.faces = set()
         self.blocks = set()
+
+    @property
+    def direction(self):
+        if self._direction is None:
+            if isinstance(self.fc_edge.Curve, FCPart.Line):
+                self._direction = np.array(self.fc_edge.Curve.Direction)
+            else:
+                self._direction = None
+        return self._direction
 
     @property
     def length(self):
@@ -321,6 +332,25 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
 
     def __hash__(self):
         return id(self)
+
+    def is_partial_same(self, other):
+        if None in [self.fc_edge, other.fc_edge]:
+            return False
+
+        if type(self.fc_edge.Curve) is not type(other.fc_edge.Curve):
+            return False
+        if isinstance(self.fc_edge.Curve, FCPart.Line):
+            if not (np.allclose(self.direction, other.direction) or np.allclose(self.direction, -other.direction)):
+                return False
+        if isinstance(self.fc_edge.Curve, FCPart.Arc):
+            if self.fc_edge.Curve.Center != other.fc_edge.Curve.Center:
+                return False
+            # TODO check radius
+
+        if self.fc_edge.distToShape(other.fc_edge)[0] > 0.1:
+            return False
+
+        return True
 
 
 class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
@@ -379,6 +409,243 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
 
     def __repr__(self):
         return f'Boundary {self.id} (name={self.name}, type={self.type}, faces={self.faces})'
+
+
+class BlockMeshFace(object, metaclass=FaceMetaMock):
+    id_iter = itertools.count()
+
+    def __init__(self, *args, **kwargs):
+        """
+        :param args:
+        :param kwargs:
+        :keyword type:  arc	            Circular arc	    Single interpolation point
+                        simpleSpline	Spline curve	    List of interpolation points
+                        polyLine	    Set of lines	    List of interpolation points
+                        polySpline	    Set of splines	    List of interpolation points
+                        line	        Straight line	    —
+        """
+        self.name = kwargs.get('name', 'unnamed face')
+        self.id = next(BlockMeshFace.id_iter)
+        self.vertices = kwargs.get('vertices')
+
+        self.merge = kwargs.get('merge', True)
+        self.check_merge_patch_pairs = kwargs.get('check_merge_patch_pairs', True)
+        self.contacts = kwargs.get('contacts', set())
+
+        self._boundary = kwargs.get('boundary', None)
+        self._fc_face = None
+
+        self._edge0 = None
+        self._edge1 = None
+        self._edge2 = None
+        self._edge3 = None
+
+        self.extruded = kwargs.get('extruded', False)   # false or: [base_profile, top_profile, path1, path2]
+
+        _ = [x.faces.add(self) for x in self.vertices]
+
+        self.blocks = set()
+        _ = self.edges
+
+    @property
+    def area(self):
+        if self.fc_face is not None:
+            return self.fc_face.Area
+        else:
+            return 0
+
+    @property
+    def boundary(self):
+        return self._boundary
+
+    @boundary.setter
+    def boundary(self, value: BlockMeshBoundary):
+        if not value == self._boundary:
+            value.add_face(self)
+        self._boundary = value
+
+    @property
+    def edge0(self):
+        if self._edge0 is None:
+            self._edge0 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[0].id,
+                                                                          self.vertices[1].id])),
+                                                 create=True)
+            self._edge0.faces.add(self)
+        return self._edge0
+
+    @property
+    def edge1(self):
+        if self._edge1 is None:
+            self._edge1 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[1].id,
+                                                                          self.vertices[2].id])),
+                                                 create=True)
+            self._edge1.faces.add(self)
+        return self._edge1
+
+    @property
+    def edge2(self):
+        if self._edge2 is None:
+            self._edge2 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[2].id,
+                                                                          self.vertices[3].id])),
+                                                 create=True)
+            self._edge2.faces.add(self)
+        return self._edge2
+
+    @property
+    def edge3(self):
+        if self._edge3 is None:
+            self._edge3 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[3].id,
+                                                                          self.vertices[0].id])),
+                                                 create=True)
+            self._edge3.faces.add(self)
+        return self._edge3
+
+    @property
+    def edges(self):
+        return [self.edge0, self.edge1, self.edge2, self.edge3]
+
+    @property
+    def fc_face(self):
+        if self._fc_face is None:
+            self._fc_face = self.create_fc_face()
+        return self._fc_face
+
+    @fc_face.setter
+    def fc_face(self, value):
+        self._fc_face = value
+
+    def set_boundary(self, value: BlockMeshBoundary):
+        self._boundary = value
+
+    def create_fc_face(self):
+
+        try:
+            if any([isinstance(x.fc_edge.Curve, FCPart.Arc) for x in self.edges if x.fc_edge is not None]):
+                print('debug')
+        except Exception as e:
+            raise e
+
+        if isinstance(self.extruded, list):
+            # https://forum.freecadweb.org/viewtopic.php?t=21636
+
+            # save_fcstd([x.fc_edge for x in self.extruded], f'/tmp/extrude_edges_face{self.id}')
+            # ex_wire = FCPart.Wire([x.fc_edge for x in self.extruded])
+            # save_fcstd([ex_wire], f'/tmp/extrude_wire{self.id}')
+
+            doc = App.newDocument()
+            sweep = doc.addObject('Part::Sweep', 'Sweep')
+            section0 = doc.addObject("Part::Feature", f'section0')
+            section0.Shape = FCPart.Wire(self.extruded[0].fc_edge)
+            section1 = doc.addObject("Part::Feature", f'section1')
+            section1.Shape = FCPart.Wire(self.extruded[1].fc_edge)
+            spine = doc.addObject("Part::Feature", f'spine')
+            spine.Shape = FCPart.Wire(self.extruded[2].fc_edge)
+
+            sweep.Sections = [section0, section1]
+            sweep.Spine = spine
+            sweep.Solid = False
+            sweep.Frenet = False
+
+            doc.recompute()
+
+            return sweep.Shape
+
+            # body = doc.addObject('PartDesign::Body', 'Body')
+            # AdditivePipe = doc.addObject("PartDesign::AdditivePipe", "AdditivePipe")
+            #
+            #
+            #
+            #
+            #
+            # body.addObject(spine)
+            #
+            # AdditivePipe.Profile = sketch1
+            # AdditivePipe.Sections = [sketch1, sketch2]
+            #
+            # doc.recompute()
+            #
+            # doc.saveCopy('/tmp/sweep_test2.FCStd')
+            #
+            # AdditivePipe.Profile = FCPart.Wire(self.extruded[0].fc_edge)
+            #
+            # sweep = FCPart.BRepSweep.MakePipeShell(FCPart.Wire(self.extruded[2].fc_edge))
+            #
+            # ps = FCPart.BRepOffsetAPI.MakePipeShell(FCPart.Wire(self.extruded[2].fc_edge))
+            # ps.setFrenetMode(True)
+            # # ps.setSpineSupport(FCPart.Wire(edges[0]))
+            # # ps.setAuxiliarySpine(FCPart.Wire(self.extruded[3].fc_edge), True, False)
+            # ps.add(FCPart.Wire(self.extruded[0].fc_edge), True, True)
+            # ps.add(FCPart.Wire(self.extruded[1].fc_edge), True, True)
+            # if ps.isReady():
+            #     ps.build()
+            # face = ps.shape()
+        else:
+            edges = [x.fc_edge for x in self.edges if x.fc_edge is not None]
+
+            if edges.__len__() < 3:
+                return None
+            else:
+                face_wire = FCPart.Wire(edges)
+
+                try:
+                    face = FCPart.Face(face_wire)
+                except:
+                    face = FCPart.makeFilledFace(FCPart.Wire(edges).OrderedEdges)
+
+            # face = make_complex_face_from_edges(face_wire.OrderedEdges)
+
+        if face.Area < 1e-3:
+            logger.warning(f'Face {self.id} area very small: {face.Area}')
+
+        return face
+
+    def common_edges(self, other, partial=True):
+
+        if partial:
+            edge_combinations = np.stack(np.meshgrid(self.edges, other.edges), -1).reshape(-1, 2)
+            try:
+                return edge_combinations[[x[0].is_partial_same(x[1]) for x in edge_combinations], 0]
+            except Exception as e:
+                raise e
+        else:
+            raise NotImplementedError
+
+    def is_same(self, other):
+        return tuple(sorted(self.vertices)) == tuple(sorted(other.vertices))
+
+    def is_part(self, other):
+        common_elements = set(self.edges) & set(other.edges)
+        return common_elements.__len__() > 1
+
+    def common_with(self, other):
+        if None in [self.fc_face, other.fc_face]:
+            return False
+
+        if self.is_same(other):
+            return True
+        if self.is_part(other):
+            return True
+        if self.common_edges(other).shape[0] > 1:
+            return True
+
+        return surfaces_in_contact(self.fc_face, other.fc_face)
+
+    def __repr__(self):
+        return f'Face {self.id} (type={self.boundary}, Area={self.area}, Vertices={self.vertices})'
+
+    def __eq__(self, other):
+        return sorted(self.vertices) == sorted(other.vertices)
+
+    def __hash__(self):
+        return id(self)
+
+    # if type(edge.Curve) is FCPart.Line:
+    #     return [BlockMeshEdge(vertices=[p1[i], p2[i]], type='line') for i in range(4)]
+    # else:
+    #     edges = [None] * 4
+    #     for i in range(4):
+    #         # move center point
+    #         center = np.array(edge.Curve.Center) + (p1[i].position - edge.Vertexes[0].Point) * face_normal
 
 
 class BlockMesh(object):
@@ -549,7 +816,13 @@ class CompBlock(object, metaclass=CompBlockMetaMock):
                 if comp_block is other_comp_block:
                     continue
 
-                # common = comp_block.fc_solid.common(other_comp_block.fc_solid)
+                export_objects([comp_block.fc_solid, other_comp_block.fc_solid], '/tmp/blocks.FCStd')
+
+                split = BOPTools.SplitAPI.booleanFragments([comp_block.fc_solid, other_comp_block.fc_solid], 'Standard', 0.1)
+
+                common = comp_block.fc_solid.common(other_comp_block.fc_solid)
+                # export_objects([split], '/tmp/split.FCStd')
+                comp_block.fc_solid.common(other_comp_block.fc_solid)
                 # export_objects([comp_block.fc_solid, other_comp_block.fc_solid, common], '/tmp/common.FCStd')
                 # export_objects([comp_block.fc_solid], '/tmp/comp_block.FCStd')
                 # c_block_dist = comp_block.fc_solid.distToShape(other_comp_block.fc_solid)[0]
@@ -566,34 +839,39 @@ class CompBlock(object, metaclass=CompBlockMetaMock):
                     for j, other_face in enumerate(other_comp_block.hull_faces):
                         ii += 1
                         logger.debug(f'Checking contact between faces {i} and {j}; {ii} of {total_faces}')
-
-                        if other_face.id == face.id:
-                            continue
-                        if other_face in face.contacts:
-                            continue
-                        if other_face.fc_face is None:
-                            continue
-                        if face.is_same(other_face):
-                            continue
-                        if face.is_part(other_face):
+                        if face.common_with(other_face):
                             merge_faces.append([face, other_face])
                             face.blocks.update([*face.blocks, *other_face.blocks])
                             face.contacts.add(other_face)
                             other_face.contacts.add(face)
-                            continue
 
-                        try:
-                            dist = face.fc_face.distToShape(other_face.fc_face)[0]
-                        except Exception as e:
-                            raise e
-                        if dist < 0.1:
-                            if surfaces_in_contact(face.fc_face, other_face.fc_face):
-
-                                export_objects([face.fc_face, other_face.fc_face], '/tmp/in_contact.FCStd')
-                                merge_faces.append([face, other_face])
-                                face.blocks.update([*face.blocks, *other_face.blocks])
-                                face.contacts.add(face)
-                                face.contacts.add(other_face)
+                        # if other_face.id == face.id:
+                        #     continue
+                        # if other_face in face.contacts:
+                        #     continue
+                        # if other_face.fc_face is None:
+                        #     continue
+                        # if face.is_same(other_face):
+                        #     continue
+                        # if face.is_part(other_face):
+                        #     merge_faces.append([face, other_face])
+                        #     face.blocks.update([*face.blocks, *other_face.blocks])
+                        #     face.contacts.add(other_face)
+                        #     other_face.contacts.add(face)
+                        #     continue
+                        #
+                        # try:
+                        #     dist = face.fc_face.distToShape(other_face.fc_face)[0]
+                        # except Exception as e:
+                        #     raise e
+                        # if dist < 0.1:
+                        #     if surfaces_in_contact(face.fc_face, other_face.fc_face):
+                        #         _ = face.is_same(other_face)
+                        #         export_objects([face.fc_face, other_face.fc_face], '/tmp/in_contact.FCStd')
+                        #         merge_faces.append([face, other_face])
+                        #         face.blocks.update([*face.blocks, *other_face.blocks])
+                        #         face.contacts.add(face)
+                        #         face.contacts.add(other_face)
 
         return merge_faces
 
@@ -657,227 +935,6 @@ inlet_patch = BlockMeshBoundary(name='inlet', type='patch')
 outlet_patch = BlockMeshBoundary(name='outlet', type='patch')
 wall_patch = BlockMeshBoundary(name='wall', type='wall')
 pipe_wall_patch = BlockMeshBoundary(name='pipe_wall', type='interface')
-
-
-class BlockMeshFace(object, metaclass=FaceMetaMock):
-    id_iter = itertools.count()
-
-    def __init__(self, *args, **kwargs):
-        """
-        :param args:
-        :param kwargs:
-        :keyword type:  arc	            Circular arc	    Single interpolation point
-                        simpleSpline	Spline curve	    List of interpolation points
-                        polyLine	    Set of lines	    List of interpolation points
-                        polySpline	    Set of splines	    List of interpolation points
-                        line	        Straight line	    —
-        """
-        self.name = kwargs.get('name', 'unnamed face')
-        self.id = next(BlockMeshFace.id_iter)
-        self.vertices = kwargs.get('vertices')
-
-        self.merge = kwargs.get('merge', True)
-        self.check_merge_patch_pairs = kwargs.get('check_merge_patch_pairs', True)
-        self.contacts = kwargs.get('contacts', set())
-
-        self._boundary = kwargs.get('boundary', None)
-        self._fc_face = None
-
-        self._edge0 = None
-        self._edge1 = None
-        self._edge2 = None
-        self._edge3 = None
-
-        self.extruded = kwargs.get('extruded', False)   # false or: [base_profile, top_profile, path1, path2]
-
-        _ = [x.faces.add(self) for x in self.vertices]
-
-        self.blocks = set()
-        _ = self.edges
-
-    @property
-    def area(self):
-        if self.fc_face is not None:
-            return self.fc_face.Area
-        else:
-            return 0
-
-    @property
-    def boundary(self):
-        return self._boundary
-
-    @boundary.setter
-    def boundary(self, value: BlockMeshBoundary):
-        if not value == self._boundary:
-            value.add_face(self)
-        self._boundary = value
-
-    @property
-    def edge0(self):
-        if self._edge0 is None:
-            self._edge0 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[0].id,
-                                                                          self.vertices[1].id])),
-                                                 create=True)
-            self._edge0.faces.add(self)
-        return self._edge0
-
-    @property
-    def edge1(self):
-        if self._edge1 is None:
-            self._edge1 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[1].id,
-                                                                          self.vertices[2].id])),
-                                                 create=True)
-            self._edge1.faces.add(self)
-        return self._edge1
-
-    @property
-    def edge2(self):
-        if self._edge2 is None:
-            self._edge2 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[2].id,
-                                                                          self.vertices[3].id])),
-                                                 create=True)
-            self._edge2.faces.add(self)
-        return self._edge2
-
-    @property
-    def edge3(self):
-        if self._edge3 is None:
-            self._edge3 = BlockMeshEdge.get_edge(vertex_ids=tuple(sorted([self.vertices[3].id,
-                                                                          self.vertices[0].id])),
-                                                 create=True)
-            self._edge3.faces.add(self)
-        return self._edge3
-
-    @property
-    def edges(self):
-        return [self.edge0, self.edge1, self.edge2, self.edge3]
-
-    @property
-    def fc_face(self):
-        if self._fc_face is None:
-            self._fc_face = self.create_fc_face()
-        return self._fc_face
-
-    @fc_face.setter
-    def fc_face(self, value):
-        self._fc_face = value
-
-    def set_boundary(self, value: BlockMeshBoundary):
-        self._boundary = value
-
-    def create_fc_face(self):
-
-        if isinstance(self.extruded, list):
-            # https://forum.freecadweb.org/viewtopic.php?t=21636
-
-            # save_fcstd([x.fc_edge for x in self.extruded], f'/tmp/extrude_edges_face{self.id}')
-            # ex_wire = FCPart.Wire([x.fc_edge for x in self.extruded])
-            # save_fcstd([ex_wire], f'/tmp/extrude_wire{self.id}')
-
-            doc = App.newDocument()
-            sweep = doc.addObject('Part::Sweep', 'Sweep')
-            section0 = doc.addObject("Part::Feature", f'section0')
-            section0.Shape = FCPart.Wire(self.extruded[0].fc_edge)
-            section1 = doc.addObject("Part::Feature", f'section1')
-            section1.Shape = FCPart.Wire(self.extruded[1].fc_edge)
-            spine = doc.addObject("Part::Feature", f'spine')
-            spine.Shape = FCPart.Wire(self.extruded[2].fc_edge)
-
-            sweep.Sections = [section0, section1]
-            sweep.Spine = spine
-            sweep.Solid = False
-            sweep.Frenet = False
-
-            doc.recompute()
-
-            return sweep.Shape
-
-            # body = doc.addObject('PartDesign::Body', 'Body')
-            # AdditivePipe = doc.addObject("PartDesign::AdditivePipe", "AdditivePipe")
-            #
-            #
-            #
-            #
-            #
-            # body.addObject(spine)
-            #
-            # AdditivePipe.Profile = sketch1
-            # AdditivePipe.Sections = [sketch1, sketch2]
-            #
-            # doc.recompute()
-            #
-            # doc.saveCopy('/tmp/sweep_test2.FCStd')
-            #
-            # AdditivePipe.Profile = FCPart.Wire(self.extruded[0].fc_edge)
-            #
-            # sweep = FCPart.BRepSweep.MakePipeShell(FCPart.Wire(self.extruded[2].fc_edge))
-            #
-            # ps = FCPart.BRepOffsetAPI.MakePipeShell(FCPart.Wire(self.extruded[2].fc_edge))
-            # ps.setFrenetMode(True)
-            # # ps.setSpineSupport(FCPart.Wire(edges[0]))
-            # # ps.setAuxiliarySpine(FCPart.Wire(self.extruded[3].fc_edge), True, False)
-            # ps.add(FCPart.Wire(self.extruded[0].fc_edge), True, True)
-            # ps.add(FCPart.Wire(self.extruded[1].fc_edge), True, True)
-            # if ps.isReady():
-            #     ps.build()
-            # face = ps.shape()
-        else:
-            edges = [x.fc_edge for x in self.edges if x.fc_edge is not None]
-
-            if edges.__len__() < 3:
-                return None
-            else:
-                face_wire = FCPart.Wire(edges)
-
-                try:
-                    face = FCPart.Face(face_wire)
-                except:
-                    face = FCPart.makeFilledFace(FCPart.Wire(edges).OrderedEdges)
-
-            # face = make_complex_face_from_edges(face_wire.OrderedEdges)
-
-        if face.Area < 1e-3:
-            logger.warning(f'Face {self.id} area very small: {face.Area}')
-
-        return face
-
-    def common_edges(self, other, partial=True):
-        raise NotImplementedError
-
-
-    def is_same(self, other):
-        return tuple(sorted(self.vertices)) == tuple(sorted(other.vertices))
-
-    def is_part(self, other):
-        common_elements = set(self.edges) & set(other.edges)
-        return common_elements.__len__() > 1
-
-    def common_with(self, other):
-        if None in [self.fc_face, other.fc_face]:
-            return False
-
-        crit1 = self.is_same(other)
-        crit2 = self.is_part(other)
-
-        if any()
-        return surfaces_in_contact(self.fc_face, other.fc_face)
-
-    def __repr__(self):
-        return f'Face {self.id} (type={self.boundary}, Area={self.area}, Vertices={self.vertices})'
-
-    def __eq__(self, other):
-        return sorted(self.vertices) == sorted(other.vertices)
-
-    def __hash__(self):
-        return id(self)
-
-    # if type(edge.Curve) is FCPart.Line:
-    #     return [BlockMeshEdge(vertices=[p1[i], p2[i]], type='line') for i in range(4)]
-    # else:
-    #     edges = [None] * 4
-    #     for i in range(4):
-    #         # move center point
-    #         center = np.array(edge.Curve.Center) + (p1[i].position - edge.Vertexes[0].Point) * face_normal
 
 
 class Block(object, metaclass=BlockMetaMock):
@@ -1400,8 +1457,8 @@ class Block(object, metaclass=BlockMetaMock):
         return self.fc_solid.distToShape(other.fc_solid)[0]
 
 
-def get_position(vertex: FCPart.Vertex):
-    return np.array([vertex.X, vertex.Y, vertex.Z])
+# def get_position(vertex: FCPart.Vertex):
+#     return np.array([vertex.X, vertex.Y, vertex.Z])
 
 
 def unit_vector(vec):
@@ -1610,30 +1667,33 @@ def create_layer_edges(layer_vertices, center_point, face_normal, reference_face
 
 def create_edges_between_layers(p1, p2, edge, face_normal):
 
-    if type(edge.Curve) is FCPart.Line:
-        return [BlockMeshEdge(vertices=[p1[i], p2[i]], type='line') for i in range(4)]
-    else:
-        edges = [None] * 4
-        for i in range(4):
-            # move center point
-            center = np.array(edge.Curve.Center) + (p1[i].position - edge.Vertexes[0].Point) * face_normal
+    try:
+        if type(edge.Curve) is FCPart.Line:
+            return [BlockMeshEdge(vertices=[p1[i], p2[i]], type='line') for i in range(4)]
+        else:
+            edges = [None] * 4
+            for i in range(4):
+                # move center point
+                center = np.array(edge.Curve.Center) + (p1[i].position - edge.Vertexes[0].Point) * face_normal
 
-            v1 = p1[i].position - center
-            v2 = p2[i].position - center
+                v1 = p1[i].position - Base.Vector(center)
+                v2 = p2[i].position - Base.Vector(center)
 
-            d_vec = unit_vector(v1 + v2)
-            radius = np.linalg.norm(p1[i].position - center)
+                d_vec = unit_vector(v1 + v2)
+                radius = np.linalg.norm(p1[i].position - center)
 
-            mid_point = center + radius * d_vec
+                mid_point = center + radius * d_vec
 
-            # mid_point = unit_vector(p1[i].position - edge.Curve.Center + p2[i].position - edge.Curve.Center) * \
-            #             np.linalg.norm(p1[i].position - edge.Curve.Center) + edge.Curve.Center
+                # mid_point = unit_vector(p1[i].position - edge.Curve.Center + p2[i].position - edge.Curve.Center) * \
+                #             np.linalg.norm(p1[i].position - edge.Curve.Center) + edge.Curve.Center
 
-            new_edge = BlockMeshEdge(vertices=[p1[i], p2[i]],
-                                     type='arc',
-                                     interpolation_points=[mid_point])
-            edges[i] = new_edge
-        return edges
+                new_edge = BlockMeshEdge(vertices=[p1[i], p2[i]],
+                                         type='arc',
+                                         interpolation_points=[mid_point])
+                edges[i] = new_edge
+            return edges
+    except Exception as e:
+        raise e
 
 
 def create_blocks(layer1_vertices,

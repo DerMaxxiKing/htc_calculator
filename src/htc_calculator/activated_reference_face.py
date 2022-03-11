@@ -34,6 +34,7 @@ class ActivatedReferenceFace(ReferenceFace):
 
         self.plain_reference_face_solid = ReferenceFace(*args, **kwargs)
 
+        self.pipe_section = kwargs.get('pipe_section')
         self.tube_diameter = kwargs.get('tube_diameter', 0.02)
         self.tube_inner_diameter = kwargs.get('tube_inner_diameter', 0.016)
         self.tube_material = kwargs.get('tube_material', None)
@@ -259,6 +260,44 @@ class ActivatedReferenceFace(ReferenceFace):
         else:
             FCPart.export(doc.Objects, filename)
 
+    def create_ogrid_with_section(self):
+        wire = self.pipe.pipe_wire
+        blocks = []
+
+        for i, edge in enumerate(wire.Edges):
+
+            if i == 0:
+                outer_pipe = False
+                inlet = True
+                outlet = False
+            elif i == wire.Edges.__len__() - 1:
+                outer_pipe = False
+                inlet = False
+                outlet = True
+            else:
+                outer_pipe = True
+                inlet = False
+                outlet = False
+
+            logger.info(f'creating block {i} of {wire.Edges.__len__()}')
+
+            new_blocks = self.pipe_section.create_block(edge,
+                                                        self.normal,
+                                                        self.tube_diameter,
+                                                        outer_pipe=outer_pipe,
+                                                        inlet=inlet,
+                                                        outlet=outlet)
+            blocks.append(new_blocks)
+
+        logger.info(f'Finished Pipe Block generation successfully\n\n')
+        block_list = functools.reduce(operator.iconcat, blocks, [])
+        pipe_comp_block = CompBlock(name='Pipe Blocks',
+                                    blocks=block_list)
+
+        # Block.save_fcstd('/tmp/blocks.FCStd')
+        # export_objects([pipe_comp_block.fc_solid], '/tmp/pipe_comp_block.FCStd')
+        return pipe_comp_block
+
     def create_o_grid(self):
 
         wire = self.pipe.pipe_wire
@@ -346,7 +385,7 @@ class ActivatedReferenceFace(ReferenceFace):
         free_comp_block = CompBlock(name='Free Blocks',
                                     blocks=free_blocks)
 
-        export_objects([free_comp_block.fc_solid], '/tmp/free_comp_block.FCStd')
+        # export_objects([free_comp_block.fc_solid], '/tmp/free_comp_block.FCStd')
 
         return free_comp_block
 
