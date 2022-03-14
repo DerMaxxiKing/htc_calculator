@@ -105,6 +105,18 @@ class EdgeMetaMock(type):
         return obj
 
 
+class ParallelEdgeSetMetaMock(type):
+
+    instances = []
+
+    def __call__(cls, *args, **kwargs):
+        obj = cls.__new__(cls, *args, **kwargs)
+        obj.__init__(*args, **kwargs)
+        # cls.instances.append(obj)
+        cls.instances.append(obj)
+        return obj
+
+
 class FaceMetaMock(type):
 
     instances = {}
@@ -280,6 +292,9 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
         self.faces = set()
         self.blocks = set()
 
+        self._parallel_edge_set = None
+
+
     @property
     def direction(self):
         if self._direction is None:
@@ -301,6 +316,12 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
         if self._fc_edge is None:
             self._fc_edge = self.create_fc_edge()
         return self._fc_edge
+
+    @property
+    def parallel_edge_set(self):
+        if self.parallel_edge_set is None:
+            self._parallel_edge_set = self.get_parallel_edge_set()
+        return self._parallel_edge_set
 
     def create_fc_edge(self):
         if self.vertices[0].fc_vertex == self.vertices[1].fc_vertex:
@@ -351,6 +372,30 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
             return False
 
         return True
+
+    def get_parallel_edge_set(self):
+        raise NotImplementedError
+
+
+class ParallelEdgesSet(object, metaclass=ParallelEdgeSetMetaMock):
+
+    id_iter = itertools.count()
+
+    @classmethod
+    def get_edges_set(cls, edge):
+        for edge_set in ParallelEdgesSet.instances:
+            raise NotImplementedError
+
+    def __init__(self, *args, **kwargs):
+
+        self.id = next(ParallelEdgesSet.id_iter)
+
+        self.edges = kwargs.get('edges', set())
+        self.cell_size = kwargs.get('cell_size', None)
+        self.num_cells = kwargs.get('num_cells', None)
+
+    @static
+    def add_set(self, p_edges):
 
 
 class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
@@ -409,6 +454,12 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
 
     def __repr__(self):
         return f'Boundary {self.id} (name={self.name}, type={self.type}, faces={self.faces})'
+
+
+inlet_patch = BlockMeshBoundary(name='inlet', type='patch')
+outlet_patch = BlockMeshBoundary(name='outlet', type='patch')
+wall_patch = BlockMeshBoundary(name='wall', type='wall')
+pipe_wall_patch = BlockMeshBoundary(name='pipe_wall', type='interface')
 
 
 class BlockMeshFace(object, metaclass=FaceMetaMock):
@@ -648,295 +699,6 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
     #         center = np.array(edge.Curve.Center) + (p1[i].position - edge.Vertexes[0].Point) * face_normal
 
 
-class BlockMesh(object):
-
-    default_path = '/tmp/'
-
-    def __init__(self, *args, **kwargs):
-        self._id = kwargs.get('_id', kwargs.get('id', uuid.uuid4()))
-        self._name = kwargs.get('_name', kwargs.get('name', 'BlockMesh {}'.format(self._id)))
-        self._case_dir = kwargs.get('_case_dir', kwargs.get('case_dir', None))
-
-        self.template = pkg_resources.read_text(msh_resources, 'block_mesh_dict')
-        self._block_mesh_dict = None
-        self._control_dict = None
-        self._fvschemes = None
-        self._fvsolution = None
-
-    @property
-    def id(self):
-        return self._id
-
-    @id.setter
-    def id(self, value):
-        if value == self._id:
-            return
-        self._id = value
-
-    @property
-    def control_dict(self):
-        if self._control_dict is None:
-            self._control_dict = pkg_resources.read_text(msh_resources, 'controlDict')
-        return self._control_dict
-
-    @control_dict.setter
-    def control_dict(self, value):
-        if value == self._control_dict:
-            return
-        self._control_dict = value
-
-    @property
-    def block_mesh_dict(self):
-        if self._block_mesh_dict is None:
-            self._block_mesh_dict = self.create_block_mesh_dict()
-        return self._block_mesh_dict
-
-    @block_mesh_dict.setter
-    def block_mesh_dict(self, value):
-        if value == self._block_mesh_dict:
-            return
-        self._block_mesh_dict = value
-
-    @property
-    def fvschemes(self):
-        if self._fvschemes is None:
-            self._fvschemes = pkg_resources.read_text(msh_resources, 'fvSchemes')
-        return self._fvschemes
-
-    @fvschemes.setter
-    def fvschemes(self, value):
-        if value == self._fvschemes:
-            return
-        self._fvschemes = value
-
-    @property
-    def fvsolution(self):
-        if self._fvsolution is None:
-            self._fvsolution = pkg_resources.read_text(msh_resources, 'fvSolution')
-        return self._fvsolution
-
-    @fvsolution.setter
-    def fvsolution(self, value):
-        if value == self._fvsolution:
-            return
-        self._fvsolution = value
-
-    @property
-    def name(self):
-        return self._name
-
-    @name.setter
-    def name(self, value):
-        if value == self._name:
-            return
-        self._name = value
-
-    @property
-    def case_dir(self):
-        if self._case_dir is None:
-            self._case_dir = os.path.join(self.default_path, 'case_' + str(self.id.hex))
-        return self._case_dir
-
-    @case_dir.setter
-    def case_dir(self, value):
-        if value == self._case_dir:
-            return
-        self._case_dir = value
-
-    def init_case(self):
-        logger.info('Initializing case...')
-
-        os.makedirs(self.case_dir, exist_ok=True)
-        os.makedirs(os.path.join(self.case_dir, '0'), exist_ok=True)
-        os.makedirs(os.path.join(self.case_dir, 'constant'), exist_ok=True)
-        os.makedirs(os.path.join(self.case_dir, 'system'), exist_ok=True)
-
-        self.write_control_dict()
-        self.write_fv_schemes()
-        self.write_fv_solution()
-        self.write_block_mesh_dict()
-
-        logger.info('Case successfully initialized')
-
-    def write_control_dict(self):
-
-        with open(os.path.join(self.case_dir, 'system', "controlDict"), mode="w") as f:
-            f.write(self.control_dict)
-
-    def write_fv_schemes(self):
-        with open(os.path.join(self.case_dir, 'system', "fvSchemes"), "w") as f:
-            f.write(self.fvschemes)
-
-    def write_fv_solution(self):
-        with open(os.path.join(self.case_dir, 'system', "fvSolution"), "w") as f:
-            f.write(self.fvsolution)
-
-    @staticmethod
-    def create_block_mesh_dict():
-
-        contacts = CompBlock.search_merge_patch_pairs()
-
-        logger.info('Creating blockMeshDict...')
-
-        template = pkg_resources.read_text(msh_resources, 'block_mesh_dict')
-
-        vertices_entry = BlockMeshVertex.block_mesh_entry()
-        template = template.replace('<vertices>', vertices_entry)
-
-        edges_entry = BlockMeshEdge.block_mesh_entry()
-        template = template.replace('<edges>', edges_entry)
-
-        block_entry = Block.block_mesh_entry()
-        template = template.replace('<blocks>', block_entry)
-
-        boundary_entry = BlockMeshBoundary.block_mesh_entry()
-        template = template.replace('<boundary>', boundary_entry)
-
-        template = template.replace('<faces>', '')
-
-        template = template.replace('<merge_patch_pairs>', '')
-
-        return template
-
-    def write_block_mesh_dict(self):
-        with open(os.path.join(self.case_dir, 'system', "blockMeshDict"), "w") as f:
-            f.write(self.block_mesh_dict)
-
-
-class CompBlock(object, metaclass=CompBlockMetaMock):
-
-    @classmethod
-    def search_merge_patch_pairs(cls):
-
-        merge_faces = []
-
-        for comp_block in cls.instances:
-            for other_comp_block in cls.instances:
-
-                if comp_block is other_comp_block:
-                    continue
-
-                export_objects([comp_block.fc_solid, other_comp_block.fc_solid], '/tmp/blocks.FCStd')
-
-                split = BOPTools.SplitAPI.booleanFragments([comp_block.fc_solid, other_comp_block.fc_solid], 'Standard', 0.1)
-
-                common = comp_block.fc_solid.common(other_comp_block.fc_solid)
-                # export_objects([split], '/tmp/split.FCStd')
-                comp_block.fc_solid.common(other_comp_block.fc_solid)
-                # export_objects([comp_block.fc_solid, other_comp_block.fc_solid, common], '/tmp/common.FCStd')
-                # export_objects([comp_block.fc_solid], '/tmp/comp_block.FCStd')
-                # c_block_dist = comp_block.fc_solid.distToShape(other_comp_block.fc_solid)[0]
-                # if c_block_dist > 1:
-                #     continue
-                total_faces = comp_block.hull_faces.__len__() * other_comp_block.hull_faces.__len__()
-                ii = -1
-
-                for i, face in enumerate(comp_block.hull_faces):
-                    if face.fc_face is None:
-                        ii += other_comp_block.hull_faces.__len__()
-                        continue
-
-                    for j, other_face in enumerate(other_comp_block.hull_faces):
-                        ii += 1
-                        logger.debug(f'Checking contact between faces {i} and {j}; {ii} of {total_faces}')
-                        if face.common_with(other_face):
-                            merge_faces.append([face, other_face])
-                            face.blocks.update([*face.blocks, *other_face.blocks])
-                            face.contacts.add(other_face)
-                            other_face.contacts.add(face)
-
-                        # if other_face.id == face.id:
-                        #     continue
-                        # if other_face in face.contacts:
-                        #     continue
-                        # if other_face.fc_face is None:
-                        #     continue
-                        # if face.is_same(other_face):
-                        #     continue
-                        # if face.is_part(other_face):
-                        #     merge_faces.append([face, other_face])
-                        #     face.blocks.update([*face.blocks, *other_face.blocks])
-                        #     face.contacts.add(other_face)
-                        #     other_face.contacts.add(face)
-                        #     continue
-                        #
-                        # try:
-                        #     dist = face.fc_face.distToShape(other_face.fc_face)[0]
-                        # except Exception as e:
-                        #     raise e
-                        # if dist < 0.1:
-                        #     if surfaces_in_contact(face.fc_face, other_face.fc_face):
-                        #         _ = face.is_same(other_face)
-                        #         export_objects([face.fc_face, other_face.fc_face], '/tmp/in_contact.FCStd')
-                        #         merge_faces.append([face, other_face])
-                        #         face.blocks.update([*face.blocks, *other_face.blocks])
-                        #         face.contacts.add(face)
-                        #         face.contacts.add(other_face)
-
-        return merge_faces
-
-    def __init__(self, *args, **kwargs):
-        self._id = kwargs.get('_id', kwargs.get('id', uuid.uuid4()))
-        self._name = kwargs.get('_name', kwargs.get('name', 'BlockMesh {}'.format(self._id)))
-
-        self._blocks = None
-        self._faces = None
-        self._hull_faces = None
-        self._fc_solid = None
-
-        self.blocks = kwargs.get('blocks', [])
-
-    @property
-    def blocks(self):
-        return self._blocks
-
-    @blocks.setter
-    def blocks(self, value):
-        self._blocks = value
-        self._faces = None
-        self._hull_faces = None
-        self._fc_solid = None
-
-    @property
-    def hull_faces(self):
-        if self._hull_faces is None:
-            faces_list = set()
-            [faces_list.update([face for face in block.faces if face.blocks.__len__() == 1]) for block in self.blocks]
-            self._hull_faces = list(faces_list)
-        return self._hull_faces
-
-    @property
-    def faces(self):
-        if self._faces is None:
-            faces_list = set()
-            [faces_list.update([face for face in block.faces]) for block in self.blocks]
-            self._faces = list(faces_list)
-        return self._faces
-
-    @property
-    def fc_solid(self):
-        if self._fc_solid is None:
-            self._fc_solid = self.create_hull_solid()
-        return self._fc_solid
-
-    def create_hull_solid(self):
-        fc_faces_list = []
-        _ = [fc_faces_list.extend(face.fc_face.Faces) for face in self.hull_faces if face.fc_face is not None]
-
-        shell = FCPart.makeShell(fc_faces_list)
-        shell.sewShape()
-        shell.fix(1e-7, 1e-7, 1e-7)
-        solid = FCPart.Solid(shell)
-
-        return solid
-
-
-inlet_patch = BlockMeshBoundary(name='inlet', type='patch')
-outlet_patch = BlockMeshBoundary(name='outlet', type='patch')
-wall_patch = BlockMeshBoundary(name='wall', type='wall')
-pipe_wall_patch = BlockMeshBoundary(name='pipe_wall', type='interface')
-
-
 class Block(object, metaclass=BlockMetaMock):
 
     face_map = {
@@ -947,6 +709,21 @@ class Block(object, metaclass=BlockMetaMock):
         'top': (4, 5, 1, 0),        # 4
         'bottom': (7, 6, 2, 3)      # 5
     }
+
+    parallel_edges_dict = {0: np.array([2, 6, 4]),
+                           1: np.array([5, 7, 3]),
+                           2: np.array([6, 4, 0]),
+                           3: np.array([1, 5, 7]),
+                           4: np.array([6, 2, 0]),
+                           5: np.array([7, 3, 1]),
+                           6: np.array([4, 0, 2]),
+                           7: np.array([3, 1, 5]),
+                           8: np.array([9, 10, 11]),
+                           9: np.array([10, 11, 8]),
+                           10: np.array([11, 8, 9]),
+                           11: np.array([8, 9, 10])}
+
+    all_parallel_edges = np.array([[0, 2, 4, 6], [1, 3, 5, 7], [8, 9, 10, 11]]),
 
     _edge_vertex_map = [[0, 1],     # 0
                         [1, 2],     # 1
@@ -1080,7 +857,7 @@ class Block(object, metaclass=BlockMetaMock):
         self.vertices = kwargs.get('vertices', [])
         self.assigned_feature = kwargs.get('assigned_feature', None)
         self.edge = kwargs.get('edge', None)
-        self.num_cells = kwargs.get('num_cells', None)
+        # self.num_cells = kwargs.get('num_cells', None)
         self.block_edges = kwargs.get('block_edges', None)
         self.cell_zone = kwargs.get('cell_zone', None)
         self.auto_cell_size = kwargs.get('auto_cell_size', True)
@@ -1113,10 +890,14 @@ class Block(object, metaclass=BlockMetaMock):
         _ = self.block_edges
         _ = self.faces
 
+        self._parallel_edges_sets = None
+
+        p_edges_setes = []
+        for p_edges in self.all_parallel_edges:
+            p_edges_setes.append(ParallelEdgesSet.add_set(self.block_edges[p_edges]))
+
     @property
     def dict_entry(self):
-
-        corrected_vertices = self.vertices
 
         if self.non_regular:
             v0 = self.vertices[2].fc_vertex.toShape().Point - self.vertices[1].fc_vertex.toShape().Point
@@ -1144,7 +925,7 @@ class Block(object, metaclass=BlockMetaMock):
 
             if np.allclose(v2_ref, v2.normalize()):
                 corrected_vertices = self.vertices
-            elif np.allclose(v2_ref,-v2.normalize()):
+            elif np.allclose(v2_ref, -v2.normalize()):
                 corrected_vertices = [*self.vertices[4:], *self.vertices[0:4]]
             else:
                 if abs(angle_between_vectors(v2_ref, v2, v0)) < 90:
@@ -1152,7 +933,8 @@ class Block(object, metaclass=BlockMetaMock):
                 else:
                     corrected_vertices = [*self.vertices[4:], *self.vertices[0:4]]
 
-        return f"hex ({' '.join(['v' + str(x.id) for x in corrected_vertices])}) {self.cell_zone} (10 10 10) simpleGrading (1 1 1)"
+        return f"hex ({' '.join(['v' + str(x.id) for x in corrected_vertices])}) {self.cell_zone} " \
+               f"({self.num_cells[0]} {self.num_cells[1]} {self.num_cells[1]}) simpleGrading (1 1 1)"
 
     # @property
     # def center_line(self):
@@ -1349,10 +1131,10 @@ class Block(object, metaclass=BlockMetaMock):
 
     @property
     def block_edges(self):
-        return [self.edge0, self.edge1, self.edge2,
-                self.edge3, self.edge4, self.edge5,
-                self.edge6, self.edge7, self.edge8,
-                self.edge9, self.edge10, self.edge11]
+        return np.array([self.edge0, self.edge1, self.edge2,
+                         self.edge3, self.edge4, self.edge5,
+                         self.edge6, self.edge7, self.edge8,
+                         self.edge9, self.edge10, self.edge11])
 
     @block_edges.setter
     def block_edges(self, value):
@@ -1392,6 +1174,12 @@ class Block(object, metaclass=BlockMetaMock):
         if self._fc_solid is None:
             self._fc_solid = self.create_fc_solid()
         return self._fc_solid
+
+    @property
+    def parallel_edges_sets(self):
+        if self._parallel_edges_sets is None:
+            self._parallel_edges_sets = self.get_parallel_edges_sets()
+        return self._parallel_edges_sets
 
     # @property
     # def edge(self):
@@ -1443,7 +1231,9 @@ class Block(object, metaclass=BlockMetaMock):
         l2 = self.vertices[3].dist_to_point(self.vertices[0])
         l3 = self.vertices[4].dist_to_point(self.vertices[0])
 
-        return [l1/self.cell_size, l2/self.cell_size, l3/self.cell_size]
+        return [int(np.ceil(l1/self.cell_size)),
+                int(np.ceil(l2/self.cell_size)),
+                int(np.ceil(l3/self.cell_size))]
 
     # def generate_edge(self):
     #     p1 = Base.Vector(self.vertices[0].position + 0.5 * (self.vertices[2].position - self.vertices[0].position))
@@ -1455,6 +1245,300 @@ class Block(object, metaclass=BlockMetaMock):
 
     def dist_to(self, other):
         return self.fc_solid.distToShape(other.fc_solid)[0]
+
+    def get_parallel_edges(self, edge):
+
+        edge_block_id = self.get_block_edge_id(edge)
+        return self.edges[parallel_edges_dict[edge_block_id]]
+
+    def get_block_edge_id(self, edge):
+        return self.block_edges.index(edge)
+
+    def get_parallel_edges_sets(self):
+        return None
+
+
+class CompBlock(object, metaclass=CompBlockMetaMock):
+
+    @classmethod
+    def search_merge_patch_pairs(cls):
+
+        merge_faces = []
+
+        for comp_block in cls.instances:
+            for other_comp_block in cls.instances:
+
+                if comp_block is other_comp_block:
+                    continue
+
+                export_objects([comp_block.fc_solid, other_comp_block.fc_solid], '/tmp/blocks.FCStd')
+
+                # split = BOPTools.SplitAPI.booleanFragments([comp_block.fc_solid, other_comp_block.fc_solid], 'Standard', 0.1)
+                #
+                # common = comp_block.fc_solid.common(other_comp_block.fc_solid)
+                # # export_objects([split], '/tmp/split.FCStd')
+                # comp_block.fc_solid.common(other_comp_block.fc_solid)
+                # # export_objects([comp_block.fc_solid, other_comp_block.fc_solid, common], '/tmp/common.FCStd')
+                # # export_objects([comp_block.fc_solid], '/tmp/comp_block.FCStd')
+                # # c_block_dist = comp_block.fc_solid.distToShape(other_comp_block.fc_solid)[0]
+                # # if c_block_dist > 1:
+                # #     continue
+                # total_faces = comp_block.hull_faces.__len__() * other_comp_block.hull_faces.__len__()
+                # ii = -1
+
+                for i, face in enumerate(comp_block.hull_faces):
+                    if face.fc_face is None:
+                        ii += other_comp_block.hull_faces.__len__()
+                        continue
+
+                    for j, other_face in enumerate(other_comp_block.hull_faces):
+                        ii += 1
+                        logger.debug(f'Checking contact between faces {i} and {j}; {ii} of {total_faces}')
+                        if face.common_with(other_face):
+                            merge_faces.append([face, other_face])
+                            face.blocks.update([*face.blocks, *other_face.blocks])
+                            face.contacts.add(other_face)
+                            other_face.contacts.add(face)
+
+                        # if other_face.id == face.id:
+                        #     continue
+                        # if other_face in face.contacts:
+                        #     continue
+                        # if other_face.fc_face is None:
+                        #     continue
+                        # if face.is_same(other_face):
+                        #     continue
+                        # if face.is_part(other_face):
+                        #     merge_faces.append([face, other_face])
+                        #     face.blocks.update([*face.blocks, *other_face.blocks])
+                        #     face.contacts.add(other_face)
+                        #     other_face.contacts.add(face)
+                        #     continue
+                        #
+                        # try:
+                        #     dist = face.fc_face.distToShape(other_face.fc_face)[0]
+                        # except Exception as e:
+                        #     raise e
+                        # if dist < 0.1:
+                        #     if surfaces_in_contact(face.fc_face, other_face.fc_face):
+                        #         _ = face.is_same(other_face)
+                        #         export_objects([face.fc_face, other_face.fc_face], '/tmp/in_contact.FCStd')
+                        #         merge_faces.append([face, other_face])
+                        #         face.blocks.update([*face.blocks, *other_face.blocks])
+                        #         face.contacts.add(face)
+                        #         face.contacts.add(other_face)
+
+        return merge_faces
+
+    def __init__(self, *args, **kwargs):
+        self._id = kwargs.get('_id', kwargs.get('id', uuid.uuid4()))
+        self._name = kwargs.get('_name', kwargs.get('name', 'BlockMesh {}'.format(self._id)))
+
+        self._blocks = None
+        self._faces = None
+        self._hull_faces = None
+        self._fc_solid = None
+
+        self.blocks = kwargs.get('blocks', [])
+
+    @property
+    def blocks(self):
+        return self._blocks
+
+    @blocks.setter
+    def blocks(self, value):
+        self._blocks = value
+        self._faces = None
+        self._hull_faces = None
+        self._fc_solid = None
+
+    @property
+    def hull_faces(self):
+        if self._hull_faces is None:
+            faces_list = set()
+            [faces_list.update([face for face in block.faces if face.blocks.__len__() == 1]) for block in self.blocks]
+            self._hull_faces = list(faces_list)
+        return self._hull_faces
+
+    @property
+    def faces(self):
+        if self._faces is None:
+            faces_list = set()
+            [faces_list.update([face for face in block.faces]) for block in self.blocks]
+            self._faces = list(faces_list)
+        return self._faces
+
+    @property
+    def fc_solid(self):
+        if self._fc_solid is None:
+            self._fc_solid = self.create_hull_solid()
+        return self._fc_solid
+
+    def create_hull_solid(self):
+        fc_faces_list = []
+        _ = [fc_faces_list.extend(face.fc_face.Faces) for face in self.hull_faces if face.fc_face is not None]
+
+        shell = FCPart.makeShell(fc_faces_list)
+        shell.sewShape()
+        shell.fix(1e-7, 1e-7, 1e-7)
+        solid = FCPart.Solid(shell)
+
+        return solid
+
+
+class BlockMesh(object):
+
+    default_path = '/tmp/'
+
+    def __init__(self, *args, **kwargs):
+        self._id = kwargs.get('_id', kwargs.get('id', uuid.uuid4()))
+        self._name = kwargs.get('_name', kwargs.get('name', 'BlockMesh {}'.format(self._id)))
+        self._case_dir = kwargs.get('_case_dir', kwargs.get('case_dir', None))
+
+        self.template = pkg_resources.read_text(msh_resources, 'block_mesh_dict')
+        self._block_mesh_dict = None
+        self._control_dict = None
+        self._fvschemes = None
+        self._fvsolution = None
+
+    @property
+    def id(self):
+        return self._id
+
+    @id.setter
+    def id(self, value):
+        if value == self._id:
+            return
+        self._id = value
+
+    @property
+    def control_dict(self):
+        if self._control_dict is None:
+            self._control_dict = pkg_resources.read_text(msh_resources, 'controlDict')
+        return self._control_dict
+
+    @control_dict.setter
+    def control_dict(self, value):
+        if value == self._control_dict:
+            return
+        self._control_dict = value
+
+    @property
+    def block_mesh_dict(self):
+        if self._block_mesh_dict is None:
+            self._block_mesh_dict = self.create_block_mesh_dict()
+        return self._block_mesh_dict
+
+    @block_mesh_dict.setter
+    def block_mesh_dict(self, value):
+        if value == self._block_mesh_dict:
+            return
+        self._block_mesh_dict = value
+
+    @property
+    def fvschemes(self):
+        if self._fvschemes is None:
+            self._fvschemes = pkg_resources.read_text(msh_resources, 'fvSchemes')
+        return self._fvschemes
+
+    @fvschemes.setter
+    def fvschemes(self, value):
+        if value == self._fvschemes:
+            return
+        self._fvschemes = value
+
+    @property
+    def fvsolution(self):
+        if self._fvsolution is None:
+            self._fvsolution = pkg_resources.read_text(msh_resources, 'fvSolution')
+        return self._fvsolution
+
+    @fvsolution.setter
+    def fvsolution(self, value):
+        if value == self._fvsolution:
+            return
+        self._fvsolution = value
+
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, value):
+        if value == self._name:
+            return
+        self._name = value
+
+    @property
+    def case_dir(self):
+        if self._case_dir is None:
+            self._case_dir = os.path.join(self.default_path, 'case_' + str(self.id.hex))
+        return self._case_dir
+
+    @case_dir.setter
+    def case_dir(self, value):
+        if value == self._case_dir:
+            return
+        self._case_dir = value
+
+    def init_case(self):
+        logger.info('Initializing case...')
+
+        os.makedirs(self.case_dir, exist_ok=True)
+        os.makedirs(os.path.join(self.case_dir, '0'), exist_ok=True)
+        os.makedirs(os.path.join(self.case_dir, 'constant'), exist_ok=True)
+        os.makedirs(os.path.join(self.case_dir, 'system'), exist_ok=True)
+
+        self.write_control_dict()
+        self.write_fv_schemes()
+        self.write_fv_solution()
+        self.write_block_mesh_dict()
+
+        logger.info('Case successfully initialized')
+
+    def write_control_dict(self):
+
+        with open(os.path.join(self.case_dir, 'system', "controlDict"), mode="w") as f:
+            f.write(self.control_dict)
+
+    def write_fv_schemes(self):
+        with open(os.path.join(self.case_dir, 'system', "fvSchemes"), "w") as f:
+            f.write(self.fvschemes)
+
+    def write_fv_solution(self):
+        with open(os.path.join(self.case_dir, 'system', "fvSolution"), "w") as f:
+            f.write(self.fvsolution)
+
+    @staticmethod
+    def create_block_mesh_dict():
+
+        # contacts = CompBlock.search_merge_patch_pairs()
+
+        logger.info('Creating blockMeshDict...')
+
+        template = pkg_resources.read_text(msh_resources, 'block_mesh_dict')
+
+        vertices_entry = BlockMeshVertex.block_mesh_entry()
+        template = template.replace('<vertices>', vertices_entry)
+
+        edges_entry = BlockMeshEdge.block_mesh_entry()
+        template = template.replace('<edges>', edges_entry)
+
+        block_entry = Block.block_mesh_entry()
+        template = template.replace('<blocks>', block_entry)
+
+        boundary_entry = BlockMeshBoundary.block_mesh_entry()
+        template = template.replace('<boundary>', boundary_entry)
+
+        template = template.replace('<faces>', '')
+
+        template = template.replace('<merge_patch_pairs>', '')
+
+        return template
+
+    def write_block_mesh_dict(self):
+        with open(os.path.join(self.case_dir, 'system', "blockMeshDict"), "w") as f:
+            f.write(self.block_mesh_dict)
 
 
 # def get_position(vertex: FCPart.Vertex):

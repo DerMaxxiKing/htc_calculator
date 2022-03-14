@@ -140,7 +140,6 @@ outer_vertex_indices = [[4, 8, 9, 5],
                         [11, 21, 22, 23],
                         [11, 23, 12, 8]]
 
-# TODO: add outer edge indices
 edge_indices = [[0, 1, 2, 3],       # Block 0
                 [4, 8, 5, 0],       # Block 1
                 [5, 9, 6, 1],       # Block 2

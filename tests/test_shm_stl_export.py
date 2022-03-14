@@ -3,6 +3,7 @@ from src.htc_calculator.reference_face import ReferenceFace
 from src.htc_calculator.activated_reference_face import ActivatedReferenceFace
 from src.htc_calculator.construction import Material, Layer, ComponentConstruction
 from src.htc_calculator.meshing.mesh_setup import MeshSetup
+from src.htc_calculator.meshing.buildin_pipe_sections.tube_with_wall_optimized import pipe_section
 
 
 # vertices = np.array([[0, 0, 0],
@@ -68,8 +69,9 @@ test_construction = ComponentConstruction(name='test_construction',
 tabs1 = ActivatedReferenceFace(vertices=vertices,
                                component_construction=test_construction,
                                start_edge=0,
-                               tube_diameter=15,
-                               tube_inner_diameter=10,
+                               pipe_section=pipe_section,
+                               tube_diameter=20,
+                               tube_inner_diameter=16,
                                tube_material=tube_material,
                                tube_distance=225,
                                tube_edge_distance=300,

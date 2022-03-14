@@ -56,7 +56,7 @@ class ActivatedReferenceFace(ReferenceFace):
     @property
     def pipe_comp_blocks(self):
         if self._pipe_comp_blocks is None:
-            self._pipe_comp_blocks = self.create_o_grid()
+            self._pipe_comp_blocks = self.create_o_grid_with_section()
         return self._pipe_comp_blocks
 
     @property
@@ -260,7 +260,7 @@ class ActivatedReferenceFace(ReferenceFace):
         else:
             FCPart.export(doc.Objects, filename)
 
-    def create_ogrid_with_section(self):
+    def create_o_grid_with_section(self):
         wire = self.pipe.pipe_wire
         blocks = []
 
@@ -281,9 +281,10 @@ class ActivatedReferenceFace(ReferenceFace):
 
             logger.info(f'creating block {i} of {wire.Edges.__len__()}')
 
-            new_blocks = self.pipe_section.create_block(edge,
-                                                        self.normal,
-                                                        self.tube_diameter,
+            new_blocks = self.pipe_section.create_block(edge=edge,
+                                                        face_normal=self.normal,
+                                                        tube_inner_diameter=self.tube_inner_diameter,
+                                                        tube_diameter=self.tube_diameter,
                                                         outer_pipe=outer_pipe,
                                                         inlet=inlet,
                                                         outlet=outlet)
@@ -298,51 +299,51 @@ class ActivatedReferenceFace(ReferenceFace):
         # export_objects([pipe_comp_block.fc_solid], '/tmp/pipe_comp_block.FCStd')
         return pipe_comp_block
 
-    def create_o_grid(self):
-
-        wire = self.pipe.pipe_wire
-        blocks = []
-
-        for i, edge in enumerate(wire.Edges):
-
-            if i == 0:
-                outer_pipe = False
-                inlet = True
-                outlet = False
-            elif i == wire.Edges.__len__() - 1:
-                outer_pipe = False
-                inlet = False
-                outlet = True
-            else:
-                outer_pipe = True
-                inlet = False
-                outlet = False
-
-            logger.info(f'creating block {i} of {wire.Edges.__len__()}')
-
-            if type(edge.Curve) is FCPart.Line:
-                logger.debug(f'creating block {i} of {wire.Edges.__len__()} as line')
-                new_blocks = create_o_grid_blocks(edge, self, outer_pipe=outer_pipe, inlet=inlet, outlet=outlet)
-                blocks.append(new_blocks)
-            else:
-                # split edge:
-                logger.debug(f'creating block {i} of {wire.Edges.__len__()} as arc')
-                sub_edges = edge.split((edge.LastParameter-edge.FirstParameter) / 2).SubShapes
-                # for sub_edge in sub_edges:
-                #     sub_edge.Placement = edge.Placement
-                #     new_blocks = create_o_grid_blocks(sub_edge, self, outer_pipe=outer_pipe, inlet=inlet, outlet=outlet)
-                #     blocks.append(new_blocks)
-                new_blocks = create_o_grid_blocks(edge, self, outer_pipe=outer_pipe, inlet=inlet, outlet=outlet)
-                blocks.append(new_blocks)
-
-        logger.info(f'Finished Pipe Block generation successfully\n\n')
-        block_list = functools.reduce(operator.iconcat, blocks, [])
-        pipe_comp_block = CompBlock(name='Pipe Blocks',
-                                    blocks=block_list)
-
-        # Block.save_fcstd('/tmp/blocks.FCStd')
-        # export_objects([pipe_comp_block.fc_solid], '/tmp/pipe_comp_block.FCStd')
-        return pipe_comp_block
+    # def create_o_grid(self):
+    #
+    #     wire = self.pipe.pipe_wire
+    #     blocks = []
+    #
+    #     for i, edge in enumerate(wire.Edges):
+    #
+    #         if i == 0:
+    #             outer_pipe = False
+    #             inlet = True
+    #             outlet = False
+    #         elif i == wire.Edges.__len__() - 1:
+    #             outer_pipe = False
+    #             inlet = False
+    #             outlet = True
+    #         else:
+    #             outer_pipe = True
+    #             inlet = False
+    #             outlet = False
+    #
+    #         logger.info(f'creating block {i} of {wire.Edges.__len__()}')
+    #
+    #         if type(edge.Curve) is FCPart.Line:
+    #             logger.debug(f'creating block {i} of {wire.Edges.__len__()} as line')
+    #             new_blocks = create_o_grid_blocks(edge, self, outer_pipe=outer_pipe, inlet=inlet, outlet=outlet)
+    #             blocks.append(new_blocks)
+    #         else:
+    #             # split edge:
+    #             logger.debug(f'creating block {i} of {wire.Edges.__len__()} as arc')
+    #             sub_edges = edge.split((edge.LastParameter-edge.FirstParameter) / 2).SubShapes
+    #             # for sub_edge in sub_edges:
+    #             #     sub_edge.Placement = edge.Placement
+    #             #     new_blocks = create_o_grid_blocks(sub_edge, self, outer_pipe=outer_pipe, inlet=inlet, outlet=outlet)
+    #             #     blocks.append(new_blocks)
+    #             new_blocks = create_o_grid_blocks(edge, self, outer_pipe=outer_pipe, inlet=inlet, outlet=outlet)
+    #             blocks.append(new_blocks)
+    #
+    #     logger.info(f'Finished Pipe Block generation successfully\n\n')
+    #     block_list = functools.reduce(operator.iconcat, blocks, [])
+    #     pipe_comp_block = CompBlock(name='Pipe Blocks',
+    #                                 blocks=block_list)
+    #
+    #     # Block.save_fcstd('/tmp/blocks.FCStd')
+    #     # export_objects([pipe_comp_block.fc_solid], '/tmp/pipe_comp_block.FCStd')
+    #     return pipe_comp_block
 
     def create_free_blocks(self):
 

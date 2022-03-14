@@ -1,4 +1,5 @@
 import numpy as np
+import copy
 
 from ..logger import logger
 from .block_mesh import BlockMeshVertex, BlockMeshEdge, Block, unit_vector, create_edges_between_layers, pipe_wall_patch, inlet_patch, outlet_patch
@@ -30,14 +31,15 @@ class PipeSection(object):
         self.block_inlet_faces = kwargs.get('block_inlet_faces')
         self.block_outlet_faces = kwargs.get('block_outlet_faces')
 
-    def create_block(self,
-                     edge,
-                     face_normal,
-                     tube_inner_diameter,
-                     tube_diameter,
-                     outer_pipe: bool = True,
-                     inlet: bool = False,
-                     outlet: bool = False):
+    def create_block(self, *args, **kwargs):
+
+        edge = kwargs.get('edge')
+        face_normal = kwargs.get('face_normal')
+        tube_inner_diameter = kwargs.get('tube_inner_diameter')
+        tube_diameter = kwargs.get('tube_diameter')
+        outer_pipe = kwargs.get('outer_pipe')
+        inlet = kwargs.get('inlet')
+        outlet = kwargs.get('outlet')
 
         layer1_vertices, layer2_vertices, construction_points1, construction_points2 = self.create_layer_vertices(edge,
                                                                                                                   face_normal,
@@ -72,14 +74,14 @@ class PipeSection(object):
             block_edges = [*[layer1_edges[x] for x in edge_indices], *[layer2_edges[x] for x in edge_indices],
                            *connect_edges]
 
-            n_cell = self.n_cell
+            n_cell = copy.deepcopy(self.n_cell)
             if None in n_cell:
                 if n_cell[0] is None:
-                    n_cell[0] = block_edges[0].length / self.cell_size[0]
+                    n_cell[0] = int(np.ceil(block_edges[0].length / self.cell_size[0]))
                 if n_cell[1] is None:
-                    n_cell[1] = block_edges[3].length / self.cell_size[1]
+                    n_cell[1] = int(np.ceil(block_edges[3].length / self.cell_size[1]))
                 if n_cell[2] is None:
-                    n_cell[2] = edge.Length / self.cell_size[2]
+                    n_cell[2] = int(np.ceil(edge.Length / self.cell_size[2]))
 
             new_block = Block(name=cell_zones,
                               vertices=vertices,
