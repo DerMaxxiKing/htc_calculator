@@ -28,6 +28,10 @@ from . import meshing_resources as msh_resources
 App = FreeCAD
 
 
+default_cell_size = 100
+default_arc_cell_size = 25
+
+
 def np_cache(function):
     @lru_cache()
     def cached_wrapper(hashable_array):
@@ -227,7 +231,8 @@ class BlockMeshVertex(object, metaclass=VertexMetaMock):
 
     @property
     def dict_entry(self):
-        return f'name v{self.id} ({self.position[0]:16.6f} {self.position[1]:16.6f} {self.position[2]:16.6f})'
+        return f'name v{self.id} ({self.position[0]:16.6f} {self.position[1]:16.6f} {self.position[2]:16.6f}) ' \
+               f'// vertex {self.id}'
 
     def dist_to_point(self, vertex):
         return np.linalg.norm(self.position - vertex.position)
@@ -282,9 +287,15 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
         self.center = kwargs.get('center', None)
         self.interpolation_points = kwargs.get('interpolation_points', None)
 
+        self._num_cells = None
         self._fc_edge = None
         self._collapsed = False
         self._direction = None
+
+        # number cells:
+        self.fixed_num_cells = kwargs.get('fixed_num_cells', False)
+        self.num_cells = kwargs.get('num_cells', None)
+        self.cell_size = kwargs.get('cell_size', default_cell_size)
 
         self.vertices[0].edges.add(self)
         self.vertices[1].edges.add(self)
@@ -293,7 +304,6 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
         self.blocks = set()
 
         self._parallel_edge_set = None
-
 
     @property
     def direction(self):
@@ -319,9 +329,27 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
 
     @property
     def parallel_edge_set(self):
-        if self.parallel_edge_set is None:
+        if self._parallel_edge_set is None:
             self._parallel_edge_set = self.get_parallel_edge_set()
         return self._parallel_edge_set
+
+    @parallel_edge_set.setter
+    def parallel_edge_set(self, value):
+        self._parallel_edge_set = value
+
+    @property
+    def num_cells(self):
+        if self._num_cells is None:
+            if self.length is not None:
+                if isinstance(self.fc_edge.Curve, FCPart.Line):
+                    self._num_cells = int(np.ceil(self.length / self.cell_size))
+                if isinstance(self.fc_edge.Curve, FCPart.Arc):
+                    self._num_cells = int(np.ceil(self.length / self.cell_size))
+        return self._num_cells
+
+    @num_cells.setter
+    def num_cells(self, value):
+        self._num_cells = value
 
     def create_fc_edge(self):
         if self.vertices[0].fc_vertex == self.vertices[1].fc_vertex:
@@ -374,7 +402,15 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
         return True
 
     def get_parallel_edge_set(self):
-        raise NotImplementedError
+        return ParallelEdgesSet.get_edges_set(self)
+
+    def translated_copy(self, translation: Base.Vector):
+
+        return BlockMeshEdge(vertices=[x + translation for x in self.vertices],
+                             type=self.type,  # arc or line
+                             center=self.center,
+                             interpolation_points=self.interpolation_points + translation
+                             )
 
 
 class ParallelEdgesSet(object, metaclass=ParallelEdgeSetMetaMock):
@@ -384,18 +420,89 @@ class ParallelEdgesSet(object, metaclass=ParallelEdgeSetMetaMock):
     @classmethod
     def get_edges_set(cls, edge):
         for edge_set in ParallelEdgesSet.instances:
-            raise NotImplementedError
+            if edge in edge_set.edges:
+                return edge_set
+        return None
+
+    @classmethod
+    def merge_sets(cls):
+
+        do_merge = True
+
+        while do_merge:
+            do_merge = False
+            for instance in cls.instances:
+                for next_instance in cls.instances:
+                    if instance == next_instance:
+                        continue
+                    if (instance.edges & next_instance.edges).__len__() > 0:
+                        instance.edges.update(next_instance.edges)
+                        _ = [setattr(x, 'parallel_edge_set', instance) for x in next_instance.edges]
+                        instance._cell_size = default_cell_size
+                        instance._num_cells = None
+                        cls.instances.remove(next_instance)
+                        do_merge = True
+                        continue
+
+    @classmethod
+    def add_set(cls, p_edges):
+
+        p_edges_set = set(p_edges)
+
+        for instance in cls.instances:
+            if (p_edges_set & instance.edges).__len__() > 0:
+                instance.add_edges(p_edges_set)
+                return instance
+
+        return cls(edges=p_edges_set)
 
     def __init__(self, *args, **kwargs):
 
         self.id = next(ParallelEdgesSet.id_iter)
 
         self.edges = kwargs.get('edges', set())
-        self.cell_size = kwargs.get('cell_size', None)
-        self.num_cells = kwargs.get('num_cells', None)
+        self._cell_size = kwargs.get('cell_size', default_cell_size)
+        self._num_cells = kwargs.get('num_cells', None)
 
-    @static
-    def add_set(self, p_edges):
+    @property
+    def cell_size(self):
+        return self._cell_size
+
+    @cell_size.setter
+    def cell_size(self, value):
+        if self.cell_size == value:
+            return
+        self.cell_size = value
+        self.num_cells = None
+
+    @property
+    def num_cells(self):
+        if self._num_cells is None:
+            fixed_num_cells = [x.num_cells for x in self.edges if x.fixed_num_cells]
+            if fixed_num_cells:
+                self._num_cells = min(fixed_num_cells)
+            else:
+                max_edges_length = max([x.length for x in self.edges])
+                num_cells = int(np.ceil(max_edges_length/self.cell_size))
+                if num_cells < 3:
+                    num_cells = 3
+                self._num_cells = num_cells
+        return self._num_cells
+
+    @num_cells.setter
+    def num_cells(self, value: int):
+        if self._num_cells is value:
+            return
+
+        if self._num_cells > value:
+            logger.warning(f'Trying to set num cells value to a smaller one than existing')
+            return
+        self._num_cells = value
+
+    def add_edges(self, edges: set[BlockMeshEdge]):
+        self.edges.update(edges)
+        _ = [setattr(x, 'parallel_edge_set', self) for x in edges]
+        self.num_cells = None
 
 
 class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
@@ -504,6 +611,12 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
             return self.fc_face.Area
         else:
             return 0
+
+    @property
+    def normal(self):
+        if self.fc_face is None:
+            return None
+        return self.fc_face.Normal
 
     @property
     def boundary(self):
@@ -681,6 +794,38 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
 
         return surfaces_in_contact(self.fc_face, other.fc_face)
 
+    def extrude(self, dist, direction=None, dist2=None):
+
+        if direction is None:
+            direction = self.normal
+
+        if (dist2 is None) or (abs(dist2) < 1):
+            v_1 = self.vertices
+            _ = [x.translated_copy(direction * dist) for x in self.edges]
+        else:
+            _ = [x.translated_copy(direction * dist2) for x in self.edges]
+            v_1 = np.array([x + dist2 * direction for x in self.vertices])
+
+        # create quad blocks:
+        if self.vertices.__len__() == 4:
+            v_2 = np.array([x + dist * direction for x in v_1])
+            new_block = Block(vertices=[*v_1, *v_2],
+                              name=f'Free Block',
+                              auto_cell_size=True,
+                              extruded=False)
+        elif self.vertices.__len__() == 3:
+            v_1 = [*v_1, v_1[0]]
+            v_2 = np.array([x + dist * direction for x in v_1])
+
+            new_block = Block(vertices=[*v_1, *v_2],
+                              name=f'Free Block',
+                              auto_cell_size=True,
+                              extruded=False,
+                              non_regular=True)
+
+
+        return new_block
+
     def __repr__(self):
         return f'Face {self.id} (type={self.boundary}, Area={self.area}, Vertices={self.vertices})'
 
@@ -723,7 +868,7 @@ class Block(object, metaclass=BlockMetaMock):
                            10: np.array([11, 8, 9]),
                            11: np.array([8, 9, 10])}
 
-    all_parallel_edges = np.array([[0, 2, 4, 6], [1, 3, 5, 7], [8, 9, 10, 11]]),
+    all_parallel_edges = np.array([[0, 2, 4, 6], [1, 3, 5, 7], [8, 9, 10, 11]])
 
     _edge_vertex_map = [[0, 1],     # 0
                         [1, 2],     # 1
@@ -742,6 +887,13 @@ class Block(object, metaclass=BlockMetaMock):
 
     id_iter = itertools.count()
     doc = App.newDocument()
+
+    @classmethod
+    def update_parallel_edges(cls):
+        for instance in cls.instances:
+            instance._parallel_edges_sets = []
+            for p_edges in Block.all_parallel_edges:
+                instance._parallel_edges_sets.append(ParallelEdgesSet.add_set(instance.block_edges[p_edges]))
 
     @classmethod
     def block_mesh_entry(cls):
@@ -892,9 +1044,14 @@ class Block(object, metaclass=BlockMetaMock):
 
         self._parallel_edges_sets = None
 
-        p_edges_setes = []
-        for p_edges in self.all_parallel_edges:
-            p_edges_setes.append(ParallelEdgesSet.add_set(self.block_edges[p_edges]))
+        self._parallel_edges_sets = []
+        for p_edges in Block.all_parallel_edges:
+            self._parallel_edges_sets.append(ParallelEdgesSet.add_set(self.block_edges[p_edges]))
+
+        self.pipe_layer_top = kwargs.get('pipe_layer_top', False)
+        self.pipe_layer_extrude_top = kwargs.get('pipe_layer_extrude_top', None)
+        self.pipe_layer_bottom = kwargs.get('pipe_layer_bottom', False)
+        self.pipe_layer_extrude_bottom = kwargs.get('pipe_layer_extrude_bottom', None)
 
     @property
     def dict_entry(self):
@@ -933,8 +1090,14 @@ class Block(object, metaclass=BlockMetaMock):
                 else:
                     corrected_vertices = [*self.vertices[4:], *self.vertices[0:4]]
 
-        return f"hex ({' '.join(['v' + str(x.id) for x in corrected_vertices])}) {self.cell_zone} " \
-               f"({self.num_cells[0]} {self.num_cells[1]} {self.num_cells[1]}) simpleGrading (1 1 1)"
+        if self.cell_zone is not None:
+            cell_zone = self.cell_zone.id
+        else:
+            cell_zone = None
+
+        return f"hex ({' '.join(['v' + str(x.id) for x in corrected_vertices])}) {cell_zone} " \
+               f"({self.num_cells[0]} {self.num_cells[1]} {self.num_cells[2]}) simpleGrading (1 1 1)   " \
+               f"// block {self.id}"
 
     # @property
     # def center_line(self):
@@ -1227,13 +1390,17 @@ class Block(object, metaclass=BlockMetaMock):
         return solid
 
     def calc_cell_size(self):
-        l1 = self.vertices[1].dist_to_point(self.vertices[0])
-        l2 = self.vertices[3].dist_to_point(self.vertices[0])
-        l3 = self.vertices[4].dist_to_point(self.vertices[0])
+        return [self.edge0.parallel_edge_set.num_cells,
+                self.edge1.parallel_edge_set.num_cells,
+                self.edge8.parallel_edge_set.num_cells]
 
-        return [int(np.ceil(l1/self.cell_size)),
-                int(np.ceil(l2/self.cell_size)),
-                int(np.ceil(l3/self.cell_size))]
+        # l1 = self.vertices[1].dist_to_point(self.vertices[0])
+        # l2 = self.vertices[3].dist_to_point(self.vertices[0])
+        # l3 = self.vertices[4].dist_to_point(self.vertices[0])
+        #
+        # return [int(np.ceil(l1/self.cell_size)),
+        #         int(np.ceil(l2/self.cell_size)),
+        #         int(np.ceil(l3/self.cell_size))]
 
     # def generate_edge(self):
     #     p1 = Base.Vector(self.vertices[0].position + 0.5 * (self.vertices[2].position - self.vertices[0].position))
@@ -1249,13 +1416,16 @@ class Block(object, metaclass=BlockMetaMock):
     def get_parallel_edges(self, edge):
 
         edge_block_id = self.get_block_edge_id(edge)
-        return self.edges[parallel_edges_dict[edge_block_id]]
+        return self.block_edges[self.parallel_edges_dict[edge_block_id]]
 
     def get_block_edge_id(self, edge):
         return self.block_edges.index(edge)
 
     def get_parallel_edges_sets(self):
-        return None
+        parallel_edges_sets = []
+        for p_edges in Block.all_parallel_edges:
+            parallel_edges_sets.append(ParallelEdgesSet.add_set(self.block_edges[p_edges]))
+        return parallel_edges_sets
 
 
 class CompBlock(object, metaclass=CompBlockMetaMock):
@@ -1288,45 +1458,14 @@ class CompBlock(object, metaclass=CompBlockMetaMock):
 
                 for i, face in enumerate(comp_block.hull_faces):
                     if face.fc_face is None:
-                        ii += other_comp_block.hull_faces.__len__()
                         continue
 
                     for j, other_face in enumerate(other_comp_block.hull_faces):
-                        ii += 1
-                        logger.debug(f'Checking contact between faces {i} and {j}; {ii} of {total_faces}')
                         if face.common_with(other_face):
                             merge_faces.append([face, other_face])
                             face.blocks.update([*face.blocks, *other_face.blocks])
                             face.contacts.add(other_face)
                             other_face.contacts.add(face)
-
-                        # if other_face.id == face.id:
-                        #     continue
-                        # if other_face in face.contacts:
-                        #     continue
-                        # if other_face.fc_face is None:
-                        #     continue
-                        # if face.is_same(other_face):
-                        #     continue
-                        # if face.is_part(other_face):
-                        #     merge_faces.append([face, other_face])
-                        #     face.blocks.update([*face.blocks, *other_face.blocks])
-                        #     face.contacts.add(other_face)
-                        #     other_face.contacts.add(face)
-                        #     continue
-                        #
-                        # try:
-                        #     dist = face.fc_face.distToShape(other_face.fc_face)[0]
-                        # except Exception as e:
-                        #     raise e
-                        # if dist < 0.1:
-                        #     if surfaces_in_contact(face.fc_face, other_face.fc_face):
-                        #         _ = face.is_same(other_face)
-                        #         export_objects([face.fc_face, other_face.fc_face], '/tmp/in_contact.FCStd')
-                        #         merge_faces.append([face, other_face])
-                        #         face.blocks.update([*face.blocks, *other_face.blocks])
-                        #         face.contacts.add(face)
-                        #         face.contacts.add(other_face)
 
         return merge_faces
 
@@ -1513,6 +1652,11 @@ class BlockMesh(object):
     def create_block_mesh_dict():
 
         # contacts = CompBlock.search_merge_patch_pairs()
+        Block.update_parallel_edges()
+        ParallelEdgesSet.merge_sets()
+
+        # export_objects([FCPart.Compound([x.fc_edge for x in y.edges]) for y in ParallelEdgesSet.instances],
+        #                '/tmp/parallel_edges.FCStd')
 
         logger.info('Creating blockMeshDict...')
 
@@ -1533,6 +1677,8 @@ class BlockMesh(object):
         template = template.replace('<faces>', '')
 
         template = template.replace('<merge_patch_pairs>', '')
+
+        # export_objects([Block.instances[15].fc_solid, Block.instances[1148].fc_solid], '/tmp/error_blocks.FCStd')
 
         return template
 

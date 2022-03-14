@@ -31,6 +31,11 @@ class PipeSection(object):
         self.block_inlet_faces = kwargs.get('block_inlet_faces')
         self.block_outlet_faces = kwargs.get('block_outlet_faces')
 
+        self.materials = kwargs.get('materials', [])
+
+        self.top_side = kwargs.get('top_side', dict())
+        self.bottom_side = kwargs.get('bottom_side', dict())
+
     def create_block(self, *args, **kwargs):
 
         edge = kwargs.get('edge')
@@ -83,14 +88,36 @@ class PipeSection(object):
                 if n_cell[2] is None:
                     n_cell[2] = int(np.ceil(edge.Length / self.cell_size[2]))
 
-            new_block = Block(name=cell_zones,
+            # top / bottom side
+            pipe_layer_top = i in self.top_side.keys()
+            pipe_layer_bottom = i in self.bottom_side.keys()
+
+            if pipe_layer_top:
+                pipe_layer_extrude_top = self.top_side[i]
+            else:
+                pipe_layer_extrude_top = None
+            if pipe_layer_bottom:
+                pipe_layer_extrude_bottom = self.bottom_side[i]
+            else:
+                pipe_layer_extrude_bottom = None
+
+            if cell_zones is not None:
+                block_name = self.materials[cell_zones].name
+            else:
+                block_name = None
+
+            new_block = Block(name=block_name,
                               vertices=vertices,
                               edge=edge,
                               block_edges=block_edges,
                               num_cells=n_cell,
                               cell_zone=cell_zones,
                               extruded=True,
-                              check_merge_patch_pairs=False)
+                              check_merge_patch_pairs=False,
+                              pipe_layer_top=pipe_layer_top,
+                              pipe_layer_bottom=pipe_layer_bottom,
+                              pipe_layer_extrude_top=pipe_layer_extrude_top,
+                              pipe_layer_extrude_bottom=pipe_layer_extrude_bottom)
 
             blocks.append(new_block)
 
@@ -178,13 +205,30 @@ class PipeSection(object):
         edges = [None] * c_edef.__len__()
         for i, e_def in enumerate(c_edef):
             if e_def[1] == 'line':
-                edges[i] = BlockMeshEdge(vertices=[layer_vertices[e_def[0][0]], layer_vertices[e_def[0][1]]], type='line')
+                if e_def.__len__() > 2:
+                    fixed_num_cells = True
+                    num_cells = e_def[2]
+                else:
+                    num_cells = None
+                    fixed_num_cells = False
+
+                edges[i] = BlockMeshEdge(vertices=[layer_vertices[e_def[0][0]],
+                                                   layer_vertices[e_def[0][1]]],
+                                         type='line',
+                                         fixed_num_cells=fixed_num_cells,
+                                         num_cells=num_cells)
             elif e_def[1] == 'arc':
+                if e_def.__len__() > 3:
+                    fixed_num_cells = True
+                    num_cells = e_def[3]
+                else:
+                    num_cells = None
+                    fixed_num_cells = False
+
                 edges[i] = BlockMeshEdge(vertices=[layer_vertices[e_def[0][0]], layer_vertices[e_def[0][1]]],
                                          type='arc',
-                                         interpolation_points=[Base.Vector(construction_points[e_def[2][0]])])
-
-                # export_objects([layer_vertices[e_def[0][0]].fc_vertex.toShape(),
-                #                 layer_vertices[e_def[0][1]].fc_vertex.toShape(),
-                #                 FCPart.Point(Base.Vector(construction_points[e_def[2][0]])).toShape()], '/tmp/arc_edge.FCStd')
+                                         interpolation_points=[Base.Vector(construction_points[e_def[2][0]])],
+                                         fixed_num_cells=fixed_num_cells,
+                                         num_cells=num_cells
+                                         )
         return edges

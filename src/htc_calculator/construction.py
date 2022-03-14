@@ -8,11 +8,49 @@ class Material(object):
         self.id = kwargs.get('id', uuid.uuid4())
         self.name = kwargs.get('name', None)
 
-        self.density = kwargs.get('density', 1000)
-        self.specific_heat_capacity = kwargs.get('specific_heat_capacity', 1000)
-        self.heat_conductivity = kwargs.get('heat_conductivity', 1000)
+        self.density = kwargs.get('density', 1000)                                      # kg / m^3
+        self.specific_heat_capacity = kwargs.get('specific_heat_capacity', 1000)        # J / kg K
+        self.heat_conductivity = kwargs.get('heat_conductivity', 1000)                  # W / m K
 
         self.roughness = kwargs.get('roughness', None)
+
+        self.of_type = kwargs.get('of_type', 'heSolidThermo')
+        self.of_mixture = kwargs.get('of_mixture', 'pureMixture')
+        self.of_transport = kwargs.get('of_transport', 'constIso')
+        self.of_thermo = kwargs.get('of_thermo', 'eConst')
+        self.of_equationOfState = kwargs.get('of_equationOfState', 'rhoConst')
+        self.specie = kwargs.get('specie', 'specie')
+        self.energy = kwargs.get('energy', 'sensibleInternalEnergy')
+
+        self.mol_weight = 1
+        self.hf = 0
+
+
+class Fluid(object):
+    def __init__(self, *args, **kwargs):
+
+        self.id = kwargs.get('id', uuid.uuid4())
+        self.name = kwargs.get('name', None)
+
+        self.density = kwargs.get('density', 1000)                                      # kg / m^3
+        self.specific_heat_capacity = kwargs.get('specific_heat_capacity', 1000)        # J / kg K
+        self.heat_conductivity = kwargs.get('heat_conductivity', 1000)                  # W / m K
+
+        self.roughness = kwargs.get('roughness', None)
+
+        self.of_type = kwargs.get('of_type', 'heRhoThermo')
+        self.of_mixture = kwargs.get('of_mixture', 'pureMixture')
+        self.of_transport = kwargs.get('of_transport', 'const')
+        self.of_thermo = kwargs.get('of_thermo', 'hConst')
+        self.of_equationOfState = kwargs.get('of_equationOfState', 'rhoConst')
+        self.specie = kwargs.get('specie', 'specie')
+        self.energy = kwargs.get('energy', 'sensibleEnthalpie')
+
+        self.mol_weight = kwargs.get('mol_weight')
+        self.hf = kwargs.get('hf', 0)
+
+        self.mu = kwargs.get('mu')
+        self.pr = kwargs.get('pr')
 
 
 class Layer(object):

@@ -2,8 +2,12 @@ import numpy as np
 from src.htc_calculator.reference_face import ReferenceFace
 from src.htc_calculator.activated_reference_face import ActivatedReferenceFace
 from src.htc_calculator.construction import Material, Layer, ComponentConstruction
+from src.htc_calculator.buildin_materials import water, aluminium
 from src.htc_calculator.meshing.mesh_setup import MeshSetup
 from src.htc_calculator.meshing.buildin_pipe_sections.tube_with_wall_optimized import pipe_section
+
+
+pipe_section.materials = [water, aluminium]
 
 
 # vertices = np.array([[0, 0, 0],
@@ -84,6 +88,7 @@ tabs1.export_stl('/tmp/test_stls')
 tabs1.save_fcstd('/tmp/assembly.FCStd')
 # tabs1.create_o_grid()
 tabs1.create_free_blocks()
+tabs1.extrude_pipe_layer()
 tabs1.generate_block_mesh_dict()
 # tabs1.generate_shm_mesh()
 

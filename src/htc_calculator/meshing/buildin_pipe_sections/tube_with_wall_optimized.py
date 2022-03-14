@@ -1,6 +1,7 @@
 from ...logger import logger
 from ..block_mesh import BlockMeshVertex, BlockMeshEdge, unit_vector
 from ..pipe_sections import PipeSection
+from ...buildin_materials import water
 import numpy as np
 
 import FreeCAD
@@ -69,28 +70,33 @@ def vertex_gen_fcn(start_point, face_normal, perp_vec, tube_inner_diameter, tube
     else:
         return [p0, p1, p2, p3, p4, p5, p6, p7], [cp0, cp1, cp2, cp3]
 
-edge_def = [([0, 1], 'line'),           # Edge 0          # inner pipe edges
-            ([1, 2], 'line'),           # Edge 1
-            ([2, 3], 'line'),           # Edge 2
-            ([3, 0], 'line'),           # Edge 3
-            ([0, 4], 'line'),           # Edge 4
-            ([1, 5], 'line'),           # Edge 5
-            ([2, 6], 'line'),           # Edge 6
-            ([3, 7], 'line'),           # Edge 7
-            ([4, 5], 'arc', [0]),           # Edge 8       # last value are interpolation / construction points
-            ([5, 6], 'arc', [1]),           # Edge 3
-            ([6, 7], 'arc', [2]),           # Edge 10
-            ([7, 4], 'arc', [3])            # Edge 11
+
+n_edge_tube = 10
+n_inner_pipe = 7
+n_tube_thickness = 3
+
+edge_def = [([0, 1], 'line', n_edge_tube),           # Edge 0          # inner pipe edges
+            ([1, 2], 'line', n_edge_tube),           # Edge 1
+            ([2, 3], 'line', n_edge_tube),           # Edge 2
+            ([3, 0], 'line', n_edge_tube),           # Edge 3
+            ([0, 4], 'line', n_inner_pipe),           # Edge 4
+            ([1, 5], 'line', n_inner_pipe),           # Edge 5
+            ([2, 6], 'line', n_inner_pipe),           # Edge 6
+            ([3, 7], 'line', n_inner_pipe),           # Edge 7
+            ([4, 5], 'arc', [0], n_edge_tube),           # Edge 8       # last value are interpolation / construction points
+            ([5, 6], 'arc', [1], n_edge_tube),           # Edge 9
+            ([6, 7], 'arc', [2], n_edge_tube),           # Edge 10
+            ([7, 4], 'arc', [3], n_edge_tube)            # Edge 11
             ]
 
-outer_edge_def = [([4, 8], 'line'),           # Edge 12 tube wall edges
-                  ([5, 9], 'line'),           # Edge 13
-                  ([6, 10], 'line'),           # Edge 14
-                  ([7, 11], 'line'),           # Edge 15
-                  ([8, 9], 'arc', [4]),           # Edge 13
-                  ([9, 10], 'arc', [5]),           # Edge 17
-                  ([10, 11], 'arc', [6]),           # Edge 18
-                  ([11, 8], 'arc', [7]),           # Edge 19
+outer_edge_def = [([4, 8], 'line', n_tube_thickness),           # Edge 12 tube wall edges
+                  ([5, 9], 'line', n_tube_thickness),           # Edge 13
+                  ([6, 10], 'line', n_tube_thickness),           # Edge 14
+                  ([7, 11], 'line', n_tube_thickness),           # Edge 15
+                  ([8, 9], 'arc', [4], [n_edge_tube]),           # Edge 16
+                  ([9, 10], 'arc', [5], [n_edge_tube]),           # Edge 17
+                  ([10, 11], 'arc', [6], [n_edge_tube]),           # Edge 18
+                  ([11, 8], 'arc', [7], [n_edge_tube]),           # Edge 19
                   ([8, 12], 'line'),           # Edge 20
                   ([9, 13], 'line'),           # Edge 21
                   ([10, 14], 'line'),           # Edge 22
@@ -117,7 +123,6 @@ outer_vertex_indices = [[4, 8, 9, 5],           # Block 5
                         [11, 15, 12, 8],            # Block 12
                         ]
 
-# TODO: add outer edge indices
 edge_indices = [[0, 1, 2, 3],       # Block 0
                 [4, 8, 5, 0],       # Block 1
                 [5, 9, 6, 1],       # Block 2
@@ -141,8 +146,8 @@ n_cell = [10, 10, None]
 # size of cells in mm; if None n_cell must be defined
 cell_size = [None, None, 50]
 
-cell_zones = ['pipe', 'pipe', 'pipe', 'pipe', 'pipe']
-outer_cell_zones = ['pipe_wall', 'pipe_wall', 'pipe_wall', 'pipe_wall', None, None, None, None]
+cell_zones = [0, 0, 0, 0, 0]
+outer_cell_zones = [1, 1, 1, 1, None, None, None, None]
 
 # id of block, id of faces which are pipe wall
 pipe_wall_def = [(1, [5]),
@@ -164,6 +169,11 @@ block_outlet_faces = [(0, [1]),
                       (4, [1]),
                       ]
 
+# define which faces are on top side and bottom side:
+top_side = {11: [3]}          # block id, face id
+bottom_side = {11: [3]}       # block id, face id
+
+
 pipe_section = PipeSection(name='Plain Tube',
                            layer_vertex_gen_function=vertex_gen_fcn,
                            edge_def=[edge_def, outer_edge_def],
@@ -174,4 +184,6 @@ pipe_section = PipeSection(name='Plain Tube',
                            cell_size=cell_size,
                            pipe_wall_def=pipe_wall_def,
                            block_inlet_faces=block_inlet_faces,
-                           block_outlet_faces=block_outlet_faces)
+                           block_outlet_faces=block_outlet_faces,
+                           top_side=top_side,
+                           bottom_side=bottom_side)

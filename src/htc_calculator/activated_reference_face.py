@@ -1,4 +1,5 @@
 import sys
+import numpy as np
 import pathlib
 import operator
 import functools
@@ -397,6 +398,36 @@ class ActivatedReferenceFace(ReferenceFace):
         # print('done')
         #
         # free_blocks = create_blocks_from_2d_mesh(quad_meshes, self)
+
+    def extrude_pipe_layer(self):
+        # top side:
+
+        layer_thicknesses = [0, *[x.thickness for x in self.component_construction.layers]]
+        layer_interfaces = [self.layer_dir * self.normal * (- self.component_construction.side_1_offset + x) for x in np.cumsum(layer_thicknesses)]
+
+        layer_interface_planes = np.array([FCPart.makePlane(99999,
+                                                            99999,
+                                                            Base.Vector(self.vertices[0] + x),
+                                                            self.normal) for x in layer_interfaces])
+
+        new_blocks = []
+        for block in self.pipe_comp_blocks.blocks:
+            if not block.pipe_layer_top:
+                continue
+            logger.debug(f'Extruding block {block}')
+            faces_to_extrude = np.array(block.faces)[np.array(block.pipe_layer_extrude_top)]
+            for face in faces_to_extrude:
+                extrude_to = face.vertices[0].fc_vertex.toShape().distToShape(layer_interface_planes[0])[0] < np.cumsum(layer_thicknesses)
+                ext_dist = 0
+                for dist in [face.vertices[0].fc_vertex.toShape().distToShape(x)[0] for x in layer_interface_planes[extrude_to]]:
+                    new_block = face.extrude(dist, direction=self.normal, dist2=ext_dist)
+                    new_blocks.append(new_block)
+
+                export_objects([new_block.fc_solid], '/tmp/extrude_block.FCStd')
+
+
+
+
 
     # def generate_hole_part(self):
     #
