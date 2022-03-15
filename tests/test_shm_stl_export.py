@@ -90,8 +90,10 @@ tabs1.save_fcstd('/tmp/assembly.FCStd')
 # tabs1.create_free_blocks()
 # tabs1.extrude_pipe_layer()
 # tabs1.update_cell_zone()
-tabs1.generate_block_mesh_dict()
+# tabs1.generate_block_mesh_dict()
 # tabs1.generate_shm_mesh()
+
+tabs1.run_case()
 
 # tabs1.generate_mesh()
 

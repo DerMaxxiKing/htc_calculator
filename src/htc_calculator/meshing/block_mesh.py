@@ -1712,9 +1712,12 @@ class BlockMesh(object):
         os.makedirs(os.path.join(self.case_dir, 'constant'), exist_ok=True)
         os.makedirs(os.path.join(self.case_dir, 'system'), exist_ok=True)
 
-        self.write_control_dict()
-        self.write_fv_schemes()
-        self.write_fv_solution()
+        if not os.path.isfile(os.path.join(self.case_dir, 'system', "controlDict")):
+            self.write_control_dict()
+        if not os.path.isfile(os.path.join(self.case_dir, 'system', "fvSchemes")):
+            self.write_fv_schemes()
+        if not os.path.isfile(os.path.join(self.case_dir, 'system', "fvSolution")):
+            self.write_fv_solution()
         self.write_block_mesh_dict()
 
         logger.info('Case successfully initialized')

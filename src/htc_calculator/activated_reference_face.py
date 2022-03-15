@@ -10,6 +10,7 @@ from .solid import Solid, PipeSolid
 from .meshing.block_mesh import Block, create_o_grid_blocks, create_blocks_from_2d_mesh, BlockMesh, CompBlock
 from .logger import logger
 from .tools import export_objects, split_wire_by_projected_vertices
+from .case.case import OFCase
 
 import FreeCAD
 import Part as FCPart
@@ -33,7 +34,15 @@ class ActivatedReferenceFace(ReferenceFace):
 
         ReferenceFace.__init__(self, *args, **kwargs)
 
+        self.reference_edge = None
+        self._pipe = None
+        self._pipe_comp_blocks = None
+        self._free_comp_blocks = None
+        self._extruded_comp_blocks = None
+        self._case = None
+
         self.plain_reference_face_solid = ReferenceFace(*args, **kwargs)
+        self.case = kwargs.get('case', None)
 
         self.pipe_section = kwargs.get('pipe_section')
         self.tube_diameter = kwargs.get('tube_diameter', 0.02)
@@ -46,14 +55,13 @@ class ActivatedReferenceFace(ReferenceFace):
 
         self.reference_edge_id = kwargs.get('start_edge', 0)
 
-        self.reference_edge = None
-        # self.pipe_wire = None
-        self._pipe = None
-        self._pipe_comp_blocks = None
-        self._free_comp_blocks = None
-        self._extruded_comp_blocks = None
-
         self.integrate_pipe()
+
+    @property
+    def case(self):
+        if self.case is None:
+            self._case = OFCase(reference_face=self)
+        return self._case
 
     @property
     def pipe_comp_blocks(self):
@@ -597,6 +605,10 @@ class ActivatedReferenceFace(ReferenceFace):
         # print(block_entry)
         # boundary_entry = BlockMeshBoundary.block_mesh_entry()
         # print(boundary_entry)
+
+    def run_case(self, *args, **kwargs):
+
+        self.case.run()
 
     def generate_mesh(self):
         pass
