@@ -250,6 +250,7 @@ class ReferenceFace(object):
             layer_solid = Solid(faces=[layer_base_faces[i], layer_top_faces[i], layer_side_faces[i]],
                                 name=f'Layer {layer.name} solid',
                                 interfaces=layer_interfaces[layer.id],
+                                layer=layer,
                                 type='Layer')
             layer_solid.features['base_faces'] = [layer_base_faces[i]]
             layer_solid.features['top_faces'] = [layer_top_faces[i]]

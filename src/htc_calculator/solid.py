@@ -42,6 +42,8 @@ class Solid(object):
         self.features = kwargs.get('features', {})
         self.surface_mesh_setup = kwargs.get('_surface_mesh_setup',
                                              kwargs.get('surface_mesh_setup', default_surface_mesh_parameter))
+        self.layer = kwargs.get('layer', None)
+
         self.state = kwargs.get('state', 'solid')
         self._obb = kwargs.get('obb', None)
 
@@ -309,6 +311,9 @@ class Solid(object):
                 __o__.Shape = face.fc_solid.Shape
         doc.recompute()
         doc.saveCopy(filename)
+
+    def is_inside(self, vec: Base.Vector):
+        return self.fc_solid.Shape.isInside(vec, 0, True)
 
     def __repr__(self):
         rep = f'Solid {self.name} {self.id} {self.Volume}'

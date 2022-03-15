@@ -51,6 +51,7 @@ class ActivatedReferenceFace(ReferenceFace):
         self._pipe = None
         self._pipe_comp_blocks = None
         self._free_comp_blocks = None
+        self._extruded_comp_blocks = None
 
         self.integrate_pipe()
 
@@ -65,6 +66,12 @@ class ActivatedReferenceFace(ReferenceFace):
         if self._free_comp_blocks is None:
             self._free_comp_blocks = self.create_free_blocks()
         return self._free_comp_blocks
+
+    @property
+    def extruded_comp_blocks(self):
+        if self._extruded_comp_blocks is None:
+            self._extruded_comp_blocks = self.extrude_pipe_layer()
+        return self._extruded_comp_blocks
 
     def integrate_pipe(self):
         self.pipe = PipeSolid(reference_face=self,
@@ -384,6 +391,12 @@ class ActivatedReferenceFace(ReferenceFace):
                                                                                   FCPart.Face(wire)]]
         free_blocks = create_blocks_from_2d_mesh(quad_meshes, self)
 
+        for block in free_blocks:
+            block.pipe_layer_top = True
+            block.pipe_layer_bottom = True
+            block.pipe_layer_extrude_top = [1]
+            block.pipe_layer_extrude_bottom = [0]
+
         free_comp_block = CompBlock(name='Free Blocks',
                                     blocks=free_blocks)
 
@@ -400,33 +413,75 @@ class ActivatedReferenceFace(ReferenceFace):
         # free_blocks = create_blocks_from_2d_mesh(quad_meshes, self)
 
     def extrude_pipe_layer(self):
-        # top side:
+        logger.info('Extruding pipe layer')
 
+        # top side:
+        # ____________________________________________________________________________________________________________________________________________
         layer_thicknesses = [0, *[x.thickness for x in self.component_construction.layers]]
         layer_interfaces = [self.layer_dir * self.normal * (- self.component_construction.side_1_offset + x) for x in np.cumsum(layer_thicknesses)]
-
         layer_interface_planes = np.array([FCPart.makePlane(99999,
                                                             99999,
                                                             Base.Vector(self.vertices[0] + x),
                                                             self.normal) for x in layer_interfaces])
 
         new_blocks = []
-        for block in self.pipe_comp_blocks.blocks:
-            if not block.pipe_layer_top:
+        for block in [*self.pipe_comp_blocks.blocks, *self.free_comp_blocks.blocks]:
+            if block.pipe_layer_top:
+                logger.debug(f'Extruding block top {block}')
+                faces_to_extrude = np.array(block.faces)[np.array(block.pipe_layer_extrude_top)]
+                for face in faces_to_extrude:
+                    extrude_to = face.vertices[0].fc_vertex.toShape().distToShape(layer_interface_planes[0])[0] < np.cumsum(layer_thicknesses)
+                    ext_dist = 0
+                    for dist in [face.vertices[0].fc_vertex.toShape().distToShape(x)[0] for x in layer_interface_planes[extrude_to]]:
+                        new_block = face.extrude(dist, direction=self.normal, dist2=ext_dist)
+                        new_blocks.append(new_block)
+                        ext_dist = dist
+            if block.pipe_layer_bottom:
+                logger.debug(f'Extruding block bottom {block}')
+                faces_to_extrude = np.array(block.faces)[np.array(block.pipe_layer_extrude_bottom)]
+                # export_objects([block.fc_solid, faces_to_extrude[0].fc_face], '/tmp/test.FCStd')
+                for face in faces_to_extrude:
+                    extrude_to = face.vertices[0].fc_vertex.toShape().distToShape(layer_interface_planes[0])[0] > np.cumsum(layer_thicknesses)
+                    ext_dist = 0
+                    for dist in [face.vertices[0].fc_vertex.toShape().distToShape(x)[0] for x in layer_interface_planes[extrude_to]]:
+                        new_block = face.extrude(dist, direction=-self.normal, dist2=ext_dist)
+                        new_blocks.append(new_block)
+                        ext_dist = dist
+
+        free_comp_block = CompBlock(name='Extruded Blocks',
+                                    blocks=new_blocks)
+        return free_comp_block
+        # export_objects([x.fc_solid for x in new_blocks], '/tmp/extrude_block.FCStd')
+
+    def update_cell_zone(self):
+
+        layer_thicknesses = [0, *[x.thickness for x in self.component_construction.layers]]
+        layer_interfaces = [self.layer_dir * self.normal * (- self.component_construction.side_1_offset + x) for x in
+                            np.cumsum(layer_thicknesses)]
+        layer_interface_planes = np.array([FCPart.makePlane(99999,
+                                                            99999,
+                                                            Base.Vector(self.vertices[0] + x),
+                                                            self.normal) for x in layer_interfaces])
+
+        layer_solids = self.assembly.solids
+        layer_solids.remove(self.assembly.features['pipe'])
+
+        for block in [*self.pipe_comp_blocks.blocks, *self.free_comp_blocks.blocks, *self.extruded_comp_blocks.blocks]:
+            if block.cell_zone is not None:
                 continue
-            logger.debug(f'Extruding block {block}')
-            faces_to_extrude = np.array(block.faces)[np.array(block.pipe_layer_extrude_top)]
-            for face in faces_to_extrude:
-                extrude_to = face.vertices[0].fc_vertex.toShape().distToShape(layer_interface_planes[0])[0] < np.cumsum(layer_thicknesses)
-                ext_dist = 0
-                for dist in [face.vertices[0].fc_vertex.toShape().distToShape(x)[0] for x in layer_interface_planes[extrude_to]]:
-                    new_block = face.extrude(dist, direction=self.normal, dist2=ext_dist)
-                    new_blocks.append(new_block)
+            try:
+                block.cell_zone = next((x.layer.material for x in layer_solids
+                                        if x.is_inside(block.fc_solid.CenterOfGravity)), None)
+            except Exception as e:
+                raise e
 
-                export_objects([new_block.fc_solid], '/tmp/extrude_block.FCStd')
+        # export_objects([FCPart.Compound([*[x.fc_solid for x in self.pipe_comp_blocks.blocks],
+        #                                  *[x.fc_solid for x in self.free_comp_blocks.blocks],
+        #                                  *[x.fc_solid for x in self.extruded_comp_blocks.blocks]]),
+        #                 block.fc_solid],
+        #                '/tmp/update_mat.FCStd')
 
-
-
+        print('done')
 
 
     # def generate_hole_part(self):
@@ -514,13 +569,6 @@ class ActivatedReferenceFace(ReferenceFace):
         # print(block_entry)
         # boundary_entry = BlockMeshBoundary.block_mesh_entry()
         # print(boundary_entry)
-
-
-
-
-
-
-
 
     def generate_mesh(self):
         pass

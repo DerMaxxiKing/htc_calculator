@@ -406,10 +406,15 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
 
     def translated_copy(self, translation: Base.Vector):
 
+        if self.interpolation_points is not None:
+            interpolation_points = [x + np.array(translation) for x in self.interpolation_points]
+        else:
+            interpolation_points = self.interpolation_points
+
         return BlockMeshEdge(vertices=[x + translation for x in self.vertices],
                              type=self.type,  # arc or line
                              center=self.center,
-                             interpolation_points=self.interpolation_points + translation
+                             interpolation_points=interpolation_points
                              )
 
 
@@ -801,16 +806,24 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
 
         if (dist2 is None) or (abs(dist2) < 1):
             v_1 = self.vertices
-            _ = [x.translated_copy(direction * dist) for x in self.edges]
+            _1 = self.edges
+            _2 = [x.translated_copy(direction * dist) for x in self.edges]
         else:
-            _ = [x.translated_copy(direction * dist2) for x in self.edges]
             v_1 = np.array([x + dist2 * direction for x in self.vertices])
+            _1 = [x.translated_copy(direction * dist2) for x in self.edges]
+            _2 = [x.translated_copy(direction * dist) for x in self.edges]
+
+        v_2 = np.array([x + dist * direction for x in self.vertices])
+        _3 = [BlockMeshEdge(vertices=[v_1[i], v_2[i]], type='line') for i in range(v_1.__len__())]
+
+        # export_objects([x.fc_edge for x in [*_1, *_2, *_3]], '/tmp/extruded_edges.FCStd')
 
         # create quad blocks:
         if self.vertices.__len__() == 4:
-            v_2 = np.array([x + dist * direction for x in v_1])
+
             new_block = Block(vertices=[*v_1, *v_2],
-                              name=f'Free Block',
+                              name=f'Extruded Block',
+                              block_edges=[*_1, *_2, *_3],
                               auto_cell_size=True,
                               extruded=False)
         elif self.vertices.__len__() == 3:
@@ -818,11 +831,11 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
             v_2 = np.array([x + dist * direction for x in v_1])
 
             new_block = Block(vertices=[*v_1, *v_2],
-                              name=f'Free Block',
+                              name=f'Extruded Block',
+                              block_edges=[*_1, *_2, *_3],
                               auto_cell_size=True,
                               extruded=False,
                               non_regular=True)
-
 
         return new_block
 
@@ -1056,6 +1069,8 @@ class Block(object, metaclass=BlockMetaMock):
     @property
     def dict_entry(self):
 
+        export_objects([self.fc_solid, [x.fc_vertex for x in self.vertices]], '/tmp/test_export.FCStd')
+
         if self.non_regular:
             v0 = self.vertices[2].fc_vertex.toShape().Point - self.vertices[1].fc_vertex.toShape().Point
             v1 = self.vertices[0].fc_vertex.toShape().Point - self.vertices[1].fc_vertex.toShape().Point
@@ -1078,7 +1093,10 @@ class Block(object, metaclass=BlockMetaMock):
             v1 = self.vertices[3].fc_vertex.toShape().Point - self.vertices[0].fc_vertex.toShape().Point
             v2 = self.vertices[4].fc_vertex.toShape().Point - self.vertices[0].fc_vertex.toShape().Point
 
-            v2_ref = v0.normalize().cross(v1.normalize()).normalize()
+            try:
+                v2_ref = v0.normalize().cross(v1.normalize()).normalize()
+            except Exception as e:
+                raise e
 
             if np.allclose(v2_ref, v2.normalize()):
                 corrected_vertices = self.vertices

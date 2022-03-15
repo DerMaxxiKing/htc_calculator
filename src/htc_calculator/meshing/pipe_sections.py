@@ -103,15 +103,17 @@ class PipeSection(object):
 
             if cell_zones is not None:
                 block_name = self.materials[cell_zones].name
+                cell_zone = self.materials[cell_zones]
             else:
                 block_name = None
+                cell_zone = None
 
             new_block = Block(name=block_name,
                               vertices=vertices,
                               edge=edge,
                               block_edges=block_edges,
                               num_cells=n_cell,
-                              cell_zone=cell_zones,
+                              cell_zone=cell_zone,
                               extruded=True,
                               check_merge_patch_pairs=False,
                               pipe_layer_top=pipe_layer_top,

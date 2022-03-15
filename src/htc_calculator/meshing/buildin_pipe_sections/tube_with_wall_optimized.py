@@ -93,10 +93,10 @@ outer_edge_def = [([4, 8], 'line', n_tube_thickness),           # Edge 12 tube w
                   ([5, 9], 'line', n_tube_thickness),           # Edge 13
                   ([6, 10], 'line', n_tube_thickness),           # Edge 14
                   ([7, 11], 'line', n_tube_thickness),           # Edge 15
-                  ([8, 9], 'arc', [4], [n_edge_tube]),           # Edge 16
-                  ([9, 10], 'arc', [5], [n_edge_tube]),           # Edge 17
-                  ([10, 11], 'arc', [6], [n_edge_tube]),           # Edge 18
-                  ([11, 8], 'arc', [7], [n_edge_tube]),           # Edge 19
+                  ([8, 9], 'arc', [4], n_edge_tube),           # Edge 16
+                  ([9, 10], 'arc', [5], n_edge_tube),           # Edge 17
+                  ([10, 11], 'arc', [6], n_edge_tube),           # Edge 18
+                  ([11, 8], 'arc', [7], n_edge_tube),           # Edge 19
                   ([8, 12], 'line'),           # Edge 20
                   ([9, 13], 'line'),           # Edge 21
                   ([10, 14], 'line'),           # Edge 22
@@ -171,7 +171,7 @@ block_outlet_faces = [(0, [1]),
 
 # define which faces are on top side and bottom side:
 top_side = {11: [3]}          # block id, face id
-bottom_side = {11: [3]}       # block id, face id
+bottom_side = {9: [3]}       # block id, face id
 
 
 pipe_section = PipeSection(name='Plain Tube',
