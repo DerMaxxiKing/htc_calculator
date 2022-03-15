@@ -14,5 +14,5 @@ PyFoam
 pyobb
 shapely
 scipy
-scipy
 tqdm
+pandas

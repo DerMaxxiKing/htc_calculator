@@ -87,9 +87,9 @@ tabs1 = ActivatedReferenceFace(vertices=vertices,
 tabs1.export_stl('/tmp/test_stls')
 tabs1.save_fcstd('/tmp/assembly.FCStd')
 # tabs1.create_o_grid()
-tabs1.create_free_blocks()
-tabs1.extrude_pipe_layer()
-tabs1.update_cell_zone()
+# tabs1.create_free_blocks()
+# tabs1.extrude_pipe_layer()
+# tabs1.update_cell_zone()
 tabs1.generate_block_mesh_dict()
 # tabs1.generate_shm_mesh()
 

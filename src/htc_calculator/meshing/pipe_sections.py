@@ -132,8 +132,7 @@ class PipeSection(object):
         if outlet:
             for block_outlet in self.block_outlet_faces:
                 for face_nr in block_outlet[1]:
-                    blocks[block_outlet[0]].faces[face_nr].boundary = inlet_patch
-
+                    blocks[block_outlet[0]].faces[face_nr].boundary = outlet_patch
         return blocks
 
     def create_layer_vertices(self,

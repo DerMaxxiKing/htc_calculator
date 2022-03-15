@@ -424,6 +424,8 @@ class ActivatedReferenceFace(ReferenceFace):
                                                             Base.Vector(self.vertices[0] + x),
                                                             self.normal) for x in layer_interfaces])
 
+        # export_objects([x.fc_solid for x in [*self.pipe_comp_blocks.blocks, *self.free_comp_blocks.blocks]], '/tmp/initial_blocks.FCStd')
+
         new_blocks = []
         for block in [*self.pipe_comp_blocks.blocks, *self.free_comp_blocks.blocks]:
             if block.pipe_layer_top:
@@ -447,15 +449,20 @@ class ActivatedReferenceFace(ReferenceFace):
                         new_block = face.extrude(dist, direction=-self.normal, dist2=ext_dist)
                         new_blocks.append(new_block)
                         ext_dist = dist
+            # export_objects([x.fc_solid for x in new_blocks], '/tmp/new_blocks.FCStd')
 
         free_comp_block = CompBlock(name='Extruded Blocks',
                                     blocks=new_blocks)
         return free_comp_block
         # export_objects([x.fc_solid for x in new_blocks], '/tmp/extrude_block.FCStd')
 
-    def update_cell_zone(self):
+    def update_cell_zone(self, blocks=None):
 
-        layer_thicknesses = [0, *[x.thickness for x in self.component_construction.layers]]
+        logger.info('Updating cell zones...')
+
+        layer_materials = np.array([x.material for x in self.component_construction.layers])
+
+        layer_thicknesses = np.array([0, *[x.thickness for x in self.component_construction.layers]])
         layer_interfaces = [self.layer_dir * self.normal * (- self.component_construction.side_1_offset + x) for x in
                             np.cumsum(layer_thicknesses)]
         layer_interface_planes = np.array([FCPart.makePlane(99999,
@@ -466,12 +473,28 @@ class ActivatedReferenceFace(ReferenceFace):
         layer_solids = self.assembly.solids
         layer_solids.remove(self.assembly.features['pipe'])
 
-        for block in [*self.pipe_comp_blocks.blocks, *self.free_comp_blocks.blocks, *self.extruded_comp_blocks.blocks]:
+        if blocks is None:
+            check_blocks = [*self.pipe_comp_blocks.blocks,
+                            *self.free_comp_blocks.blocks,
+                            *self.extruded_comp_blocks.blocks]
+        else:
+            check_blocks = blocks
+
+        # _ = [setattr(x, 'cell_zone',
+        #     layer_materials[np.argmax(
+        #         layer_interface_planes[0].distToShape(
+        #     FCPart.Vertex(tuple(x.dirty_center)))[0] < layer_thicknesses) - 1])
+        #      for x in check_blocks if x.cell_zone is None]
+
+        for block in check_blocks:
             if block.cell_zone is not None:
                 continue
             try:
-                block.cell_zone = next((x.layer.material for x in layer_solids
-                                        if x.is_inside(block.fc_solid.CenterOfGravity)), None)
+
+                # block.cell_zone = layer_materials[np.argmax(layer_interface_planes[0].distToShape(
+                #     FCPart.Vertex(block.fc_solid.CenterOfGravity))[0] < layer_thicknesses) - 1]
+                block.cell_zone = layer_materials[np.argmax(layer_interface_planes[0].distToShape(
+                    FCPart.Vertex(tuple(block.dirty_center)))[0] < layer_thicknesses) - 1]
             except Exception as e:
                 raise e
 
@@ -481,8 +504,7 @@ class ActivatedReferenceFace(ReferenceFace):
         #                 block.fc_solid],
         #                '/tmp/update_mat.FCStd')
 
-        print('done')
-
+        logger.info('Cell zones updated successfully')
 
     # def generate_hole_part(self):
     #
@@ -557,6 +579,12 @@ class ActivatedReferenceFace(ReferenceFace):
         doc.saveCopy(filename)
 
     def generate_block_mesh_dict(self):
+
+        _ = self.pipe_comp_blocks
+        _ = self.free_comp_blocks
+        _ = self.extruded_comp_blocks
+
+        self.update_cell_zone()
 
         block_mesh = BlockMesh(name=self.name)
         block_mesh.init_case()

@@ -25,6 +25,13 @@ class Material(object):
         self.mol_weight = 1
         self.hf = 0
 
+    @property
+    def txt_id(self):
+        if isinstance(self.id, uuid.UUID):
+            return 'a' + str(self.id.hex)
+        else:
+            return str(self.id)
+
 
 class Fluid(object):
     def __init__(self, *args, **kwargs):
@@ -52,6 +59,13 @@ class Fluid(object):
         self.mu = kwargs.get('mu')
         self.pr = kwargs.get('pr')
 
+    @property
+    def txt_id(self):
+        if isinstance(self.id, uuid.UUID):
+            return 'a' + str(self.id.hex)
+        else:
+            return str(self.id)
+
 
 class Layer(object):
 
@@ -62,6 +76,13 @@ class Layer(object):
         self.material = kwargs.get('material', None)
         self.thickness = kwargs.get('thickness', None)
         self.solid = None
+
+    @property
+    def txt_id(self):
+        if isinstance(self.id, uuid.UUID):
+            return 'a' + str(self.id.hex)
+        else:
+            return str(self.id)
 
 
 class ComponentConstruction(object):
@@ -93,3 +114,10 @@ class ComponentConstruction(object):
     @property
     def thickness(self):
         return sum([x.thickness for x in self.layers])
+
+    @property
+    def txt_id(self):
+        if isinstance(self.id, uuid.UUID):
+            return 'a' + str(self.id.hex)
+        else:
+            return str(self.id)

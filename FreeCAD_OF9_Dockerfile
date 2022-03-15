@@ -1,0 +1,52 @@
+FROM ubuntu:20.04
+
+CMD ["/bin/bash"]
+
+WORKDIR /tmp
+
+# start with more uptodate packages
+RUN apt-get update \
+    && apt-get -y --no-install-recommends install python3.8 python3-pip wget libgl1\
+    && rm -rf /var/lib/apt/lists/*
+
+# freecad
+RUN wget https://github.com/FreeCAD/FreeCAD/releases/download/0.19.2/FreeCAD_0.19-24291-Linux-Conda_glibc2.12-x86_64.AppImage \
+   && chmod +x FreeCAD_0.19-24291-Linux-Conda_glibc2.12-x86_64.AppImage \
+   && ./FreeCAD_0.19-24291-Linux-Conda_glibc2.12-x86_64.AppImage --appimage-extract \
+   && rm FreeCAD_0.19-24291-Linux-Conda_glibc2.12-x86_64.AppImage
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+	&& apt-get install -y \
+		vim \
+		ssh \
+		sudo \
+		wget \
+		software-properties-common ;\
+		rm -rf /var/lib/apt/lists/*
+
+RUN useradd --user-group --create-home --shell /bin/bash foam ;\
+	echo "foam ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+RUN sh -c "wget -O - http://dl.openfoam.org/gpg.key | apt-key add -" ;\
+	add-apt-repository http://dl.openfoam.org/ubuntu ;\
+	apt-get update ;\
+	apt-get install -y openfoam9 ;\
+	rm -rf /var/lib/apt/lists/* ;\
+	echo "source /opt/openfoam9/etc/bashrc" >> ~foam/.bashrc ;\
+	echo "export OMPI_MCA_btl_vader_single_copy_mechanism=none" >> ~foam/.bashrc
+
+USER foam
+
+ENV PYTHONPATH="${PYTHONPATH}:/tmp/squashfs-root/usr/lib/python3.9/site-packages/:/tmp/squashfs-root/usr/lib/"
+# ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/tmp/squashfs-root/usr/lib/
+# ENV FreeCADPath="/tmp/squashfs-root/usr/lib/"
+
+COPY tests/test_imports.py /tmp/test_imports.py
+COPY python_startup.py .
+
+ENV FREECAD_STARTUP_FILE ./python_startup.py
+ENV PYTHONSTARTUP ${FREECAD_STARTUP_FILE}
+
+# RUN python3 test_imports.py

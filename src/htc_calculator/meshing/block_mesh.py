@@ -224,6 +224,13 @@ class BlockMeshVertex(object, metaclass=VertexMetaMock):
         return f'Vertex {self.id} (position={self.position[0], self.position[1], self.position[2]})'
 
     @property
+    def txt_id(self):
+        if isinstance(self.id, uuid.UUID):
+            return 'a' + str(self.id.hex)
+        else:
+            return str(self.id)
+
+    @property
     def fc_vertex(self):
         if self._fc_vertex is None:
             self._fc_vertex = FCPart.Point(Base.Vector(self.position[0], self.position[1], self.position[2]))
@@ -306,6 +313,13 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
         self._parallel_edge_set = None
 
     @property
+    def txt_id(self):
+        if isinstance(self.id, uuid.UUID):
+            return 'a' + str(self.id.hex)
+        else:
+            return str(self.id)
+
+    @property
     def direction(self):
         if self._direction is None:
             if isinstance(self.fc_edge.Curve, FCPart.Line):
@@ -371,8 +385,12 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
 
     @property
     def dict_entry(self):
+        if self.vertices[0] is self.vertices[1]:
+            return None
+
         if self.type == 'line':
-            return f'line v{self.vertices[0].id} v{self.vertices[1].id}'
+            return None
+            # return f'line v{self.vertices[0].id} v{self.vertices[1].id}'
         elif self.type == 'arc':
             return f'arc {self.vertices[0].id} {self.vertices[1].id} ' \
                    f'({self.interpolation_points[0][0]:16.6f} ' \
@@ -470,6 +488,13 @@ class ParallelEdgesSet(object, metaclass=ParallelEdgeSetMetaMock):
         self._num_cells = kwargs.get('num_cells', None)
 
     @property
+    def txt_id(self):
+        if isinstance(self.id, uuid.UUID):
+            return 'a' + str(self.id.hex)
+        else:
+            return str(self.id)
+
+    @property
     def cell_size(self):
         return self._cell_size
 
@@ -539,6 +564,13 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         self._faces.update(faces)
 
     @property
+    def txt_id(self):
+        if isinstance(self.id, uuid.UUID):
+            return 'a' + str(self.id.hex)
+        else:
+            return str(self.id)
+
+    @property
     def faces(self):
         return self._faces
 
@@ -572,6 +604,8 @@ inlet_patch = BlockMeshBoundary(name='inlet', type='patch')
 outlet_patch = BlockMeshBoundary(name='outlet', type='patch')
 wall_patch = BlockMeshBoundary(name='wall', type='wall')
 pipe_wall_patch = BlockMeshBoundary(name='pipe_wall', type='interface')
+top_side_patch = BlockMeshBoundary(name='top_side', type='patch')
+bottom_side_patch = BlockMeshBoundary(name='bottom_side', type='patch')
 
 
 class BlockMeshFace(object, metaclass=FaceMetaMock):
@@ -609,6 +643,13 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
 
         self.blocks = set()
         _ = self.edges
+
+    @property
+    def txt_id(self):
+        if isinstance(self.id, uuid.UUID):
+            return 'a' + str(self.id.hex)
+        else:
+            return str(self.id)
 
     @property
     def area(self):
@@ -801,34 +842,44 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
 
     def extrude(self, dist, direction=None, dist2=None):
 
+        non_regular = False
+
         if direction is None:
             direction = self.normal
 
+        vertices = self.vertices
+        if set(vertices).__len__() == 3:
+            # vertices = list(set(self.vertices))
+            vertices = [ii for n, ii in enumerate(self.vertices) if ii not in self.vertices[:n]]
+            non_regular = True
+
         if (dist2 is None) or (abs(dist2) < 1):
-            v_1 = self.vertices
+            v_1 = vertices
             _1 = self.edges
             _2 = [x.translated_copy(direction * dist) for x in self.edges]
         else:
-            v_1 = np.array([x + dist2 * direction for x in self.vertices])
+            v_1 = np.array([x + (dist2 * direction) for x in vertices])
             _1 = [x.translated_copy(direction * dist2) for x in self.edges]
             _2 = [x.translated_copy(direction * dist) for x in self.edges]
 
-        v_2 = np.array([x + dist * direction for x in self.vertices])
+        v_2 = np.array([x + (dist * direction) for x in self.vertices])
         _3 = [BlockMeshEdge(vertices=[v_1[i], v_2[i]], type='line') for i in range(v_1.__len__())]
 
         # export_objects([x.fc_edge for x in [*_1, *_2, *_3]], '/tmp/extruded_edges.FCStd')
 
         # create quad blocks:
-        if self.vertices.__len__() == 4:
+
+        if vertices.__len__() == 4:
 
             new_block = Block(vertices=[*v_1, *v_2],
                               name=f'Extruded Block',
                               block_edges=[*_1, *_2, *_3],
                               auto_cell_size=True,
+                              non_regular=non_regular,
                               extruded=False)
-        elif self.vertices.__len__() == 3:
+        elif vertices.__len__() == 3:
             v_1 = [*v_1, v_1[0]]
-            v_2 = np.array([x + dist * direction for x in v_1])
+            v_2 = [*v_2, v_2[0]]
 
             new_block = Block(vertices=[*v_1, *v_2],
                               name=f'Extruded Block',
@@ -1016,6 +1067,7 @@ class Block(object, metaclass=BlockMetaMock):
         self._fc_solid = None
         self._faces = None
         self._edge = None
+        self._dirty_center = None
 
         self.name = kwargs.get('name', 'unnamed_block')
         self.id = next(Block.id_iter)
@@ -1067,9 +1119,16 @@ class Block(object, metaclass=BlockMetaMock):
         self.pipe_layer_extrude_bottom = kwargs.get('pipe_layer_extrude_bottom', None)
 
     @property
+    def txt_id(self):
+        if isinstance(self.id, uuid.UUID):
+            return 'a' + str(self.id.hex)
+        else:
+            return str(self.id)
+
+    @property
     def dict_entry(self):
 
-        export_objects([self.fc_solid, [x.fc_vertex for x in self.vertices]], '/tmp/test_export.FCStd')
+        # export_objects([self.fc_solid, *[x.fc_vertex.toShape() for x in self.vertices]], '/tmp/test_export.FCStd')
 
         if self.non_regular:
             v0 = self.vertices[2].fc_vertex.toShape().Point - self.vertices[1].fc_vertex.toShape().Point
@@ -1109,7 +1168,7 @@ class Block(object, metaclass=BlockMetaMock):
                     corrected_vertices = [*self.vertices[4:], *self.vertices[0:4]]
 
         if self.cell_zone is not None:
-            cell_zone = self.cell_zone.id
+            cell_zone = self.cell_zone.txt_id
         else:
             cell_zone = None
 
@@ -1353,8 +1412,15 @@ class Block(object, metaclass=BlockMetaMock):
     @property
     def fc_solid(self):
         if self._fc_solid is None:
+            logger.debug(f'Creating fc_solid for block {self.id}')
             self._fc_solid = self.create_fc_solid()
         return self._fc_solid
+
+    @property
+    def dirty_center(self):
+        if self._dirty_center is None:
+            self._dirty_center = np.mean(np.array([x.position for x in self.vertices]), axis=0)
+        return self._dirty_center
 
     @property
     def parallel_edges_sets(self):
