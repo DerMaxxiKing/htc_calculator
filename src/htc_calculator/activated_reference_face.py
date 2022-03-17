@@ -14,15 +14,15 @@ from .case.case import OFCase
 
 import FreeCAD
 import Part as FCPart
-import BOPTools.SplitAPI
+# import BOPTools.SplitAPI
 # import Mesh
 # import BOPTools
-from Draft import make_fillet
+# from Draft import make_fillet
 from FreeCAD import Base
-from Arch import makePipe
-from MeshPart import meshFromShape
-import ObjectsFem
-from femmesh.gmshtools import GmshTools as gt
+# from Arch import makePipe
+# from MeshPart import meshFromShape
+# import ObjectsFem
+# from femmesh.gmshtools import GmshTools as gt
 
 
 App = FreeCAD
@@ -59,9 +59,13 @@ class ActivatedReferenceFace(ReferenceFace):
 
     @property
     def case(self):
-        if self.case is None:
+        if self._case is None:
             self._case = OFCase(reference_face=self)
         return self._case
+
+    @case.setter
+    def case(self, value):
+        self._case = value
 
     @property
     def pipe_comp_blocks(self):
@@ -610,26 +614,26 @@ class ActivatedReferenceFace(ReferenceFace):
 
         self.case.run()
 
-    def generate_mesh(self):
-        pass
-
-        doc = App.newDocument("MeshTest")
-        __o__ = doc.addObject("Part::Feature", f'pipe_solid')
-        __o__.Shape = self.assembly.comp_solid
-        femmesh_obj = ObjectsFem.makeMeshGmsh(doc, self.name + "_Mesh")
-        doc.recompute()
-        doc.saveCopy('/tmp/test.FCStd')
-        gm = gt(femmesh_obj)
-        gm.update_mesh_data()
-        gm.get_tmp_file_paths("/tmp/fcgm_" + str(len), True)
-        gm.get_gmsh_command()
-        gm.write_gmsh_input_files()
-        error = gm.run_gmsh_with_geo()
-        print(error)
-        gm.read_and_set_new_mesh()
-        doc.recompute()
-
-        Block.save_fcstd('/tmp/blocks2.FCStd')
+    # def generate_mesh(self):
+    #     pass
+    #
+    #     doc = App.newDocument("MeshTest")
+    #     __o__ = doc.addObject("Part::Feature", f'pipe_solid')
+    #     __o__.Shape = self.assembly.comp_solid
+    #     femmesh_obj = ObjectsFem.makeMeshGmsh(doc, self.name + "_Mesh")
+    #     doc.recompute()
+    #     doc.saveCopy('/tmp/test.FCStd')
+    #     gm = gt(femmesh_obj)
+    #     gm.update_mesh_data()
+    #     gm.get_tmp_file_paths("/tmp/fcgm_" + str(len), True)
+    #     gm.get_gmsh_command()
+    #     gm.write_gmsh_input_files()
+    #     error = gm.run_gmsh_with_geo()
+    #     print(error)
+    #     gm.read_and_set_new_mesh()
+    #     doc.recompute()
+    #
+    #     Block.save_fcstd('/tmp/blocks2.FCStd')
 
 
 def replace(arr, find, replace):
@@ -643,30 +647,30 @@ def replace(arr, find, replace):
     return arr
 
 
-def test_mesh_creation():
-    # https://github.com/berndhahnebach/FreeCAD_bhb/blob/59c470dedf28da2632abfe6e4481ce09aaf6e233/src/Mod/Fem/femmesh/gmshtools.py#L906
-    # more sophisticated example which changes the mesh size
-    doc = App.newDocument("MeshTest")
-    box_obj = doc.addObject("Part::Box", "Box")
-    doc.recompute()
-    box_obj.ViewObject.Visibility = False
-    max_mesh_sizes = [0.5, 1, 2, 3, 5, 10]
-    for len in max_mesh_sizes:
-        quantity_len = "{}".format(len)
-        print("\n\n Start length = {}".format(quantity_len))
-        femmesh_obj = ObjectsFem.makeMeshGmsh(doc, box_obj.Name + "_Mesh")
-        femmesh_obj.Part = box_obj
-        femmesh_obj.CharacteristicLengthMax = "{}".format(quantity_len)
-        femmesh_obj.CharacteristicLengthMin = "{}".format(quantity_len)
-        doc.recompute()
-        gm = GmshTools(femmesh_obj)
-        gm.update_mesh_data()
-        # set the tmp file path to some user path including the length
-        gm.get_tmp_file_paths("/tmp/fcgm_" + str(len), True)
-        gm.get_gmsh_command()
-        gm.write_gmsh_input_files()
-        error = gm.run_gmsh_with_geo()
-        print(error)
-        gm.read_and_set_new_mesh()
-        doc.recompute()
-        print("Done length = {}".format(quantity_len))
+# def test_mesh_creation():
+#     # https://github.com/berndhahnebach/FreeCAD_bhb/blob/59c470dedf28da2632abfe6e4481ce09aaf6e233/src/Mod/Fem/femmesh/gmshtools.py#L906
+#     # more sophisticated example which changes the mesh size
+#     doc = App.newDocument("MeshTest")
+#     box_obj = doc.addObject("Part::Box", "Box")
+#     doc.recompute()
+#     box_obj.ViewObject.Visibility = False
+#     max_mesh_sizes = [0.5, 1, 2, 3, 5, 10]
+#     for len in max_mesh_sizes:
+#         quantity_len = "{}".format(len)
+#         print("\n\n Start length = {}".format(quantity_len))
+#         femmesh_obj = ObjectsFem.makeMeshGmsh(doc, box_obj.Name + "_Mesh")
+#         femmesh_obj.Part = box_obj
+#         femmesh_obj.CharacteristicLengthMax = "{}".format(quantity_len)
+#         femmesh_obj.CharacteristicLengthMin = "{}".format(quantity_len)
+#         doc.recompute()
+#         gm = GmshTools(femmesh_obj)
+#         gm.update_mesh_data()
+#         # set the tmp file path to some user path including the length
+#         gm.get_tmp_file_paths("/tmp/fcgm_" + str(len), True)
+#         gm.get_gmsh_command()
+#         gm.write_gmsh_input_files()
+#         error = gm.run_gmsh_with_geo()
+#         print(error)
+#         gm.read_and_set_new_mesh()
+#         doc.recompute()
+#         print("Done length = {}".format(quantity_len))

@@ -1,7 +1,11 @@
 import uuid
+import os
+import stat
 
 from ..logger import logger
 from ..meshing.block_mesh import BlockMesh
+
+from PyFoam.Applications.Decomposer import Decomposer
 
 try:
     import importlib.resources as pkg_resources
@@ -9,7 +13,7 @@ except ImportError:
     # Try backported to PY<37 `importlib_resources`.
     import importlib_resources as pkg_resources
 
-from . import case_resources as case_resources
+from . import case_resources
 
 
 class OFCase(object):
@@ -145,19 +149,19 @@ class OFCase(object):
         all_mesh_full_filename = os.path.join(self.case_dir, "Allmesh")
         with open(all_mesh_full_filename, "w") as f:
             f.write(self.all_mesh)
-        os.chmod(all_mesh_full_filename, st.st_mode | stat.S_IEXEC)
+        os.chmod(all_mesh_full_filename,  stat.S_IEXEC)
 
     def write_all_clean(self):
         all_clean_full_filename = os.path.join(self.case_dir, "Allclean")
         with open(all_clean_full_filename, "w") as f:
             f.write(self.all_clean)
-        os.chmod(all_clean_full_filename, st.st_mode | stat.S_IEXEC)
+        os.chmod(all_clean_full_filename, stat.S_IEXEC)
 
     def write_all_run(self):
         all_run_full_filename = os.path.join(self.case_dir, "Allrun")
         with open(all_run_full_filename, "w") as f:
             f.write(self.all_run)
-        os.chmod(all_run_full_filename, st.st_mode | stat.S_IEXEC)
+        os.chmod(all_run_full_filename, stat.S_IEXEC)
 
     def write_control_dict(self):
         with open(os.path.join(self.case_dir, 'system', "controlDict"), mode="w") as f:
@@ -326,19 +330,19 @@ class OFCase(object):
         all_mesh_full_filename = os.path.join(self.case_dir, "Allmesh")
         with open(all_mesh_full_filename, "w") as f:
             f.write(self.all_mesh)
-        os.chmod(all_mesh_full_filename, st.st_mode | stat.S_IEXEC)
+        os.chmod(all_mesh_full_filename, stat.S_IEXEC)
 
     def write_all_clean(self):
         all_clean_full_filename = os.path.join(self.case_dir, "Allclean")
         with open(all_clean_full_filename, "w") as f:
             f.write(self.all_clean)
-        os.chmod(all_clean_full_filename, st.st_mode | stat.S_IEXEC)
+        os.chmod(all_clean_full_filename, stat.S_IEXEC)
 
     def write_all_run(self):
         all_run_full_filename = os.path.join(self.case_dir, "Allrun")
         with open(all_run_full_filename, "w") as f:
             f.write(self.all_run)
-        os.chmod(all_run_full_filename, st.st_mode | stat.S_IEXEC)
+        os.chmod(all_run_full_filename, stat.S_IEXEC)
 
     def write_control_dict(self):
         with open(os.path.join(self.case_dir, 'system', "controlDict"), mode="w") as f:
@@ -354,9 +358,14 @@ class OFCase(object):
 
     def run(self):
 
-        _ = self.reference_faces.pipe_comp_blocks
-        _ = self.reference_faces.free_comp_blocks
-        _ = self.reference_faces.extruded_comp_blocks
-        self.reference_faces.update_cell_zone()
+        _ = self.reference_face.pipe_comp_blocks
+        _ = self.reference_face.free_comp_blocks
+        _ = self.reference_face.extruded_comp_blocks
+        self.reference_face.update_cell_zone()
 
         self.block_mesh.init_case()
+
+        self.write_all_mesh()
+        self.write_all_run()
+
+        logger.debug('bla bla')
