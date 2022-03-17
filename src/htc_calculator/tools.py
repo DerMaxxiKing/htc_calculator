@@ -9,7 +9,7 @@ import Part as FCPart
 import Points
 import gmsh
 import meshio
-import Draft
+# import Draft
 import numpy as np
 from Draft import make_fillet
 from FreeCAD import Base

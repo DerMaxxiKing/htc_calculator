@@ -6,6 +6,9 @@ from src.htc_calculator.buildin_materials import water, aluminium
 from src.htc_calculator.meshing.mesh_setup import MeshSetup
 from src.htc_calculator.meshing.buildin_pipe_sections.tube_with_wall_optimized import pipe_section
 
+# import sys
+# print(sys.path)
+# sys.path.insert(0, '/tmp/squashfs-root/usr/lib/python3.9/site-packages')
 
 pipe_section.materials = [water, aluminium]
 

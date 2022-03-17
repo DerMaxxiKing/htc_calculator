@@ -6,7 +6,8 @@ WORKDIR /tmp
 
 # start with more uptodate packages
 RUN apt-get update \
-    && apt-get -y --no-install-recommends install python3.8 python3-pip wget libgl1\
+    && apt-get -y --no-install-recommends install python3.9 python3-pip wget libgl1\
+    && pip3 install pyside2 PyQt5 \
     && rm -rf /var/lib/apt/lists/*
 
 # freecad
@@ -44,9 +45,9 @@ ENV PYTHONPATH="${PYTHONPATH}:/tmp/squashfs-root/usr/lib/python3.9/site-packages
 # ENV FreeCADPath="/tmp/squashfs-root/usr/lib/"
 
 COPY tests/test_imports.py /tmp/test_imports.py
-COPY python_startup.py .
+# COPY python_startup.py .
 
-ENV FREECAD_STARTUP_FILE ./python_startup.py
-ENV PYTHONSTARTUP ${FREECAD_STARTUP_FILE}
+# ENV FREECAD_STARTUP_FILE ./python_startup.py
+# ENV PYTHONSTARTUP ${FREECAD_STARTUP_FILE}
 
 # RUN python3 test_imports.py
