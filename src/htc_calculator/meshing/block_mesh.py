@@ -7,15 +7,15 @@ from functools import lru_cache, wraps
 from ..logger import logger
 from ..tools import vector_to_np_array, perpendicular_vector, export_objects, angle_between_vectors, array_row_intersection
 from ..geo_tools import search_contacts, surfaces_in_contact, get_position
-import trimesh
+# import trimesh
 
 import FreeCAD
 import Part as FCPart
-import Draft
+# import Draft
 from FreeCAD import Base
 import DraftVecUtils
-import PartDesign
-import BOPTools.SplitFeatures
+# import PartDesign
+# import BOPTools.SplitFeatures
 
 try:
     import importlib.resources as pkg_resources
@@ -607,6 +607,9 @@ pipe_wall_patch = BlockMeshBoundary(name='pipe_wall', type='interface')
 top_side_patch = BlockMeshBoundary(name='top_side', type='patch')
 bottom_side_patch = BlockMeshBoundary(name='bottom_side', type='patch')
 
+NoPlane = object()
+NoNormal = object()
+
 
 class BlockMeshFace(object, metaclass=FaceMetaMock):
     id_iter = itertools.count()
@@ -637,12 +640,39 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
         self._edge2 = None
         self._edge3 = None
 
+        self._plane = None
+        self._dirty_center = None
+        self._normal = None
+        self._planar = None
+
         self.extruded = kwargs.get('extruded', False)   # false or: [base_profile, top_profile, path1, path2]
 
         _ = [x.faces.add(self) for x in self.vertices]
 
         self.blocks = set()
         _ = self.edges
+
+    @property
+    def plane(self):
+        if self._plane is None:
+            pts_set = list(set(self.vertices))
+            if pts_set.__len__() < 3:
+                return NoPlane
+            self._plane = FCPart.Plane(Base.Vector(pts_set[0].position),
+                                       Base.Vector(pts_set[1].position),
+                                       Base.Vector(pts_set[2].position))
+        return self._plane
+
+    @property
+    def planar(self):
+        if self._planar is None:
+            if self.plane is NoPlane:
+                self._planar = False
+            elif self.plane.toShape().distToShape(self.vertices[3].fc_vertex.toShape())[0] < 1e-3:
+                self._planar = True
+            else:
+                self._planar = False
+        return self._planar
 
     @property
     def txt_id(self):
@@ -659,10 +689,19 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
             return 0
 
     @property
+    def dirty_center(self):
+        if self._dirty_center is None:
+            self._dirty_center = np.mean(np.array([x.position for x in self.vertices]), axis=0)
+        return self._dirty_center
+
+    @property
     def normal(self):
-        if self.fc_face is None:
-            return None
-        return self.fc_face.Normal
+        if self._normal is None:
+            if self.planar:
+                self._normal = np.array(self.plane.Axis)
+            else:
+                self._normal = NoNormal
+        return self._normal
 
     @property
     def boundary(self):
@@ -1561,8 +1600,15 @@ class CompBlock(object, metaclass=CompBlockMetaMock):
         self._faces = None
         self._hull_faces = None
         self._fc_solid = None
+        self._cell_zones = None
 
         self.blocks = kwargs.get('blocks', [])
+
+    @property
+    def cell_zones(self):
+        if self._cell_zones is None:
+            self._cell_zones = {x.cell_zone for x in self.blocks}
+        return self._cell_zones
 
     @property
     def blocks(self):

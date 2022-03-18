@@ -1,7 +1,7 @@
 import numpy as np
 from src.htc_calculator.reference_face import ReferenceFace
 from src.htc_calculator.activated_reference_face import ActivatedReferenceFace
-from src.htc_calculator.construction import Material, Layer, ComponentConstruction
+from src.htc_calculator.construction import Solid, Layer, ComponentConstruction
 from src.htc_calculator.buildin_materials import water, aluminium
 from src.htc_calculator.meshing.mesh_setup import MeshSetup
 from src.htc_calculator.meshing.buildin_pipe_sections.tube_with_wall_optimized import pipe_section
@@ -25,26 +25,26 @@ vertices = np.array([[0, 0, 0],
                      [5000, 5000, 0],
                      [0, 5000, 0]])
 
-tube_material = Material(name='Tube Material',
-                         density=1800,
-                         specific_heat_capacity=700,
-                         heat_conductivity=0.4,
-                         roughness=0.0004)
+tube_material = Solid(name='Tube Material',
+                      density=1800,
+                      specific_heat_capacity=700,
+                      heat_conductivity=0.4,
+                      roughness=0.0004)
 
-concrete = Material(name='concrete',
-                    density=2600,
-                    specific_heat_capacity=1000,
-                    heat_conductivity=2.5)
+concrete = Solid(name='concrete',
+                 density=2600,
+                 specific_heat_capacity=1000,
+                 heat_conductivity=2.5)
 
-rockwool = Material(name='rockwool',
-                    density=250,
-                    specific_heat_capacity=840,
-                    heat_conductivity=0.034)
+rockwool = Solid(name='rockwool',
+                 density=250,
+                 specific_heat_capacity=840,
+                 heat_conductivity=0.034)
 
-plaster = Material(name='plaster',
-                   density=1500,
-                   specific_heat_capacity=960,
-                   heat_conductivity=0.60)
+plaster = Solid(name='plaster',
+                density=1500,
+                specific_heat_capacity=960,
+                heat_conductivity=0.60)
 
 layer0 = Layer(name='layer0_plaster', material=plaster, thickness=20)
 layer1 = Layer(name='layer1_concrete', material=concrete, thickness=200)

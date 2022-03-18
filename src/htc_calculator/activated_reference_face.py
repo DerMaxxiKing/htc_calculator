@@ -7,7 +7,8 @@ from .reference_face import ReferenceFace
 from .tools import project_point_on_line, export_objects
 from .face import Face
 from .solid import Solid, PipeSolid
-from .meshing.block_mesh import Block, create_o_grid_blocks, create_blocks_from_2d_mesh, BlockMesh, CompBlock
+from .meshing.block_mesh import create_blocks_from_2d_mesh, BlockMesh, \
+    CompBlock, NoNormal, bottom_side_patch, top_side_patch
 from .logger import logger
 from .tools import export_objects, split_wire_by_projected_vertices
 from .case.case import OFCase
@@ -15,15 +16,7 @@ from tqdm import tqdm, trange
 
 import FreeCAD
 import Part as FCPart
-# import BOPTools.SplitAPI
-# import Mesh
-# import BOPTools
-# from Draft import make_fillet
 from FreeCAD import Base
-# from Arch import makePipe
-# from MeshPart import meshFromShape
-# import ObjectsFem
-# from femmesh.gmshtools import GmshTools as gt
 
 
 App = FreeCAD
@@ -40,7 +33,9 @@ class ActivatedReferenceFace(ReferenceFace):
         self._pipe_comp_blocks = None
         self._free_comp_blocks = None
         self._extruded_comp_blocks = None
+        self._comp_blocks = None
         self._case = None
+        self._layer_interface_planes = None
 
         self.plain_reference_face_solid = ReferenceFace(*args, **kwargs)
         self.case = kwargs.get('case', None)
@@ -81,6 +76,16 @@ class ActivatedReferenceFace(ReferenceFace):
         return self._free_comp_blocks
 
     @property
+    def comp_blocks(self):
+        if self._comp_blocks is None:
+            self._comp_blocks = CompBlock(name='Final Blocks',
+                                          blocks=[*self.pipe_comp_blocks.blocks,
+                                                  *self.free_comp_blocks.blocks,
+                                                  *self.extruded_comp_blocks.blocks])
+            # export_objects([FCPart.Compound([x.fc_face for x in self._comp_blocks.hull_faces])], '/tmp/hull_faces.FCStd')
+        return self._comp_blocks
+
+    @property
     def extruded_comp_blocks(self):
         if self._extruded_comp_blocks is None:
             self._extruded_comp_blocks = self.extrude_pipe_layer()
@@ -105,157 +110,18 @@ class ActivatedReferenceFace(ReferenceFace):
     def pipe(self, value):
         self._pipe = value
 
-    # def generate_tube_spline(self):
-    #
-    #     # doc = App.newDocument("tube_spline")
-    #
-    #     self.reference_edge = self.reference_face.Edges[self.reference_edge_id]
-    #     normal = self.get_normal(Base.Vector(self.reference_edge.Vertexes[0].X, self.reference_edge.Vertexes[0].Y, self.reference_edge.Vertexes[0].Z))
-    #     tube_main_dir = self.reference_edge.Curve.Direction.cross(normal)
-    #
-    #     offset = -self.tube_edge_distance
-    #     wires = []
-    #     offset_possible = True
-    #
-    #     while offset_possible:
-    #         try:
-    #             wire = self.reference_face.OuterWire.makeOffset2D(offset, join=1, openResult=False, intersection=False)
-    #
-    #             # check if another
-    #             try:
-    #                 self.reference_face.OuterWire.makeOffset2D(offset - self.tube_distance, join=1, openResult=False, intersection=False)
-    #                 wires.append(wire)
-    #                 offset = offset - 2 * self.tube_distance
-    #             except Exception as e:
-    #                 print(e)
-    #                 offset_possible = False
-    #         except Exception as e:
-    #             print(e)
-    #             offset_possible = False
-    #
-    #     pipe_edges = []
-    #
-    #     if (self.reference_face.Edges.__len__() - 1) >= (self.reference_edge_id + 1):
-    #         start_edge_id = self.reference_edge_id + 1
-    #     else:
-    #         start_edge_id = 0
-    #
-    #     # create inflow
-    #     V1 = wires[0].Edges[start_edge_id].Vertex1.Point + tube_main_dir * 2 * self.tube_edge_distance
-    #     V2 = wires[0].Edges[start_edge_id].Vertex1.Point
-    #     pipe_edges.append(FCPart.LineSegment(V1, V2).toShape())
-    #
-    #     # add edges except the start_edge
-    #     pipe_edges.extend(wires[0].Edges[self.reference_edge_id+1:])
-    #     pipe_edges.extend(wires[0].Edges[0:self.reference_edge_id:])
-    #
-    #     # modify reference_edge_id edge
-    #     p1 = wires[0].Edges[self.reference_edge_id].Vertex1.Point
-    #     p2 = wires[0].Edges[self.reference_edge_id].Vertex2.Point
-    #     v1 = p1
-    #     v2 = p2 - 2 * (p2 - p1).normalize() * self.tube_distance
-    #     pipe_edges.append(FCPart.LineSegment(v1, v2).toShape())
-    #
-    #     # export_wire([self.reference_face.OuterWire, *pipe_edges])
-    #
-    #     i = 1
-    #     while i <= (wires.__len__()-1):
-    #         # create connection from previous wire to current wire:
-    #         dir1 = (wires[i].Edges[start_edge_id].Vertex1.Point - pipe_edges[-1].Vertex2.Point).normalize()
-    #         dir2 = (wires[i].Edges[start_edge_id].Vertexes[1].Point - pipe_edges[-1].Vertex2.Point).normalize()
-    #
-    #         if sum(abs(abs(dir1) - abs(dir2))) < 1e-10:
-    #             pipe_edges.append(FCPart.LineSegment(pipe_edges[-1].Vertex2.Point,
-    #                                                  wires[i].Edges[start_edge_id].Vertexes[1].Point).toShape())
-    #         else:
-    #             projected_point = FreeCAD.Base.Vector(project_point_on_line(point=wires[i].Edges[start_edge_id].Vertex1.Point, line=pipe_edges[-1]))
-    #
-    #             # change_previous end edge:
-    #             pipe_edges[-1] = FCPart.LineSegment(pipe_edges[-1].Vertex1.Point, projected_point).toShape()
-    #
-    #             pipe_edges.append(FCPart.LineSegment(wires[i].Edges[start_edge_id].Vertex1.Point,
-    #                                                  projected_point).toShape())
-    #             pipe_edges.append(wires[i].Edges[start_edge_id])
-    #
-    #
-    #         # #pipe_edges.append(FCPart.LineSegment(v1, v2).toShape())
-    #         #
-    #         # pipe_edges.append(FCPart.LineSegment(pipe_edges[-1].Vertex2.Point,
-    #         #                                      wires[i].Edges[start_edge_id].Vertexes[1].Point).toShape())
-    #
-    #         # add other edges except start_edge
-    #         pipe_edges.extend(wires[i].Edges[self.reference_edge_id + 2:])
-    #         pipe_edges.extend(wires[i].Edges[0:self.reference_edge_id:])
-    #
-    #         # modify reference_edge_id edge
-    #         p1 = wires[i].Edges[self.reference_edge_id].Vertex1.Point
-    #         p2 = wires[i].Edges[self.reference_edge_id].Vertex2.Point
-    #         v1 = p1
-    #         v2 = p2 - 2 * (p2 - p1).normalize() * self.tube_distance
-    #         pipe_edges.append(FCPart.LineSegment(v1, v2).toShape())
-    #
-    #         i = i + 1
-    #
-    #     # create
-    #     succeeded = False
-    #     while not succeeded:
-    #         wire_in = FCPart.Wire(pipe_edges)
-    #         wire_out = wire_in.makeOffset2D(-self.tube_distance, join=1, openResult=True, intersection=False)
-    #         wire_in.distToShape(wire_out)
-    #
-    #         # create connection between wire_in and wire_out:
-    #         v1 = wire_in.Edges[-1].Vertex2.Point
-    #         v2 = wire_out.Edges[-1].Vertex2.Point
-    #         connection_edge = FCPart.LineSegment(v1, v2).toShape()
-    #
-    #         edges_out = wire_out.Edges
-    #         edges_out.reverse()
-    #
-    #         all_edges = [*wire_in.Edges, connection_edge, *edges_out]
-    #
-    #         try:
-    #             FCPart.Wire(all_edges, intersection=False)
-    #             succeeded = True
-    #         except Exception as e:
-    #             succeeded = False
-    #             del pipe_edges[-1]
-    #
-    #     if self.bending_radius is not None:
-    #         edges_with_radius = all_edges[0:1]
-    #
-    #         for i in range(1, all_edges.__len__()):
-    #             if self.bending_radius > min([edges_with_radius[-1].Length * 0.5, all_edges[i].Length * 0.5]):
-    #                 bending_radius = min([edges_with_radius[-1].Length * 0.5, all_edges[i].Length * 0.5])
-    #             else:
-    #                 bending_radius = self.bending_radius
-    #
-    #             new_edges = make_fillet([edges_with_radius[-1], all_edges[i]], radius=bending_radius)
-    #             if new_edges is not None:
-    #                 edges_with_radius[-1] = new_edges.Shape.OrderedEdges[0]
-    #                 edges_with_radius.extend(new_edges.Shape.OrderedEdges[1:])
-    #             else:
-    #                 edges_with_radius.append(all_edges[i])
-    #
-    #         self.pipe_wire = FCPart.Wire(edges_with_radius)
-    #     else:
-    #         self.pipe_wire = FCPart.Wire(all_edges)
-    #
-    #     self.pipe_wire.Placement.move(self.layer_dir * normal * (- self.component_construction.side_1_offset + self.tube_side_1_offset))
+    @property
+    def layer_interface_planes(self):
+        if self._layer_interface_planes is None:
+            layer_thicknesses = [0, *[x.thickness for x in self.component_construction.layers]]
+            layer_interfaces = [self.layer_dir * self.normal * (- self.component_construction.side_1_offset + x) for x
+                                in np.cumsum(layer_thicknesses)]
+            self._layer_interface_planes = np.array([FCPart.makePlane(99999,
+                                                                99999,
+                                                                Base.Vector(self.vertices[0] + x),
+                                                                self.normal) for x in layer_interfaces])
+        return self._layer_interface_planes
 
-    # def generate_solid_pipe(self):
-    #
-    #     doc = App.newDocument()
-    #     __o__ = doc.addObject("Part::Feature", f'pipe_wire')
-    #     __o__.Shape = self.pipe_wire
-    #     pipe = makePipe(__o__, self.tube_diameter)
-    #     doc.recompute()
-    #     # self.pipe = pipe.Shape
-    #
-    #     self.pipe = Solid(name=f'Pipe_{self.tube_diameter}mm',
-    #                       type='Pipe',
-    #                       fc_solid=pipe)
-    #     print(self.pipe.faces)
-        
     def export_solid_pipe(self, filename):
         doc = App.newDocument()
         __o__ = doc.addObject("Part::Feature", f'pipe_solid')
@@ -323,52 +189,6 @@ class ActivatedReferenceFace(ReferenceFace):
         # export_objects([pipe_comp_block.fc_solid], '/tmp/pipe_comp_block.FCStd')
         return pipe_comp_block
 
-    # def create_o_grid(self):
-    #
-    #     wire = self.pipe.pipe_wire
-    #     blocks = []
-    #
-    #     for i, edge in enumerate(wire.Edges):
-    #
-    #         if i == 0:
-    #             outer_pipe = False
-    #             inlet = True
-    #             outlet = False
-    #         elif i == wire.Edges.__len__() - 1:
-    #             outer_pipe = False
-    #             inlet = False
-    #             outlet = True
-    #         else:
-    #             outer_pipe = True
-    #             inlet = False
-    #             outlet = False
-    #
-    #         logger.info(f'creating block {i} of {wire.Edges.__len__()}')
-    #
-    #         if type(edge.Curve) is FCPart.Line:
-    #             logger.debug(f'creating block {i} of {wire.Edges.__len__()} as line')
-    #             new_blocks = create_o_grid_blocks(edge, self, outer_pipe=outer_pipe, inlet=inlet, outlet=outlet)
-    #             blocks.append(new_blocks)
-    #         else:
-    #             # split edge:
-    #             logger.debug(f'creating block {i} of {wire.Edges.__len__()} as arc')
-    #             sub_edges = edge.split((edge.LastParameter-edge.FirstParameter) / 2).SubShapes
-    #             # for sub_edge in sub_edges:
-    #             #     sub_edge.Placement = edge.Placement
-    #             #     new_blocks = create_o_grid_blocks(sub_edge, self, outer_pipe=outer_pipe, inlet=inlet, outlet=outlet)
-    #             #     blocks.append(new_blocks)
-    #             new_blocks = create_o_grid_blocks(edge, self, outer_pipe=outer_pipe, inlet=inlet, outlet=outlet)
-    #             blocks.append(new_blocks)
-    #
-    #     logger.info(f'Finished Pipe Block generation successfully\n\n')
-    #     block_list = functools.reduce(operator.iconcat, blocks, [])
-    #     pipe_comp_block = CompBlock(name='Pipe Blocks',
-    #                                 blocks=block_list)
-    #
-    #     # Block.save_fcstd('/tmp/blocks.FCStd')
-    #     # export_objects([pipe_comp_block.fc_solid], '/tmp/pipe_comp_block.FCStd')
-    #     return pipe_comp_block
-
     def create_free_blocks(self):
 
         logger.info(f'Creating free block mesh for {self.name}, {self.id}')
@@ -420,25 +240,13 @@ class ActivatedReferenceFace(ReferenceFace):
 
         return free_comp_block
 
-        # Block.save_fcstd('/tmp/blocks2.FCStd')
-        #
-        # export_objects([ref_face, cutted_face], '/tmp/cutted_face.FCStd')
-        #
-        # print('done')
-        #
-        # free_blocks = create_blocks_from_2d_mesh(quad_meshes, self)
-
     def extrude_pipe_layer(self):
         logger.info('Extruding pipe layer')
 
         # top side:
         # ____________________________________________________________________________________________________________________________________________
-        layer_thicknesses = [0, *[x.thickness for x in self.component_construction.layers]]
-        layer_interfaces = [self.layer_dir * self.normal * (- self.component_construction.side_1_offset + x) for x in np.cumsum(layer_thicknesses)]
-        layer_interface_planes = np.array([FCPart.makePlane(99999,
-                                                            99999,
-                                                            Base.Vector(self.vertices[0] + x),
-                                                            self.normal) for x in layer_interfaces])
+        layer_thicknesses = np.array([0, *[x.thickness for x in self.component_construction.layers]])
+        layer_interface_planes = self.layer_interface_planes
 
         # export_objects([x.fc_solid for x in [*self.pipe_comp_blocks.blocks, *self.free_comp_blocks.blocks]], '/tmp/initial_blocks.FCStd')
 
@@ -479,12 +287,7 @@ class ActivatedReferenceFace(ReferenceFace):
         layer_materials = np.array([x.material for x in self.component_construction.layers])
 
         layer_thicknesses = np.array([0, *[x.thickness for x in self.component_construction.layers]])
-        layer_interfaces = [self.layer_dir * self.normal * (- self.component_construction.side_1_offset + x) for x in
-                            np.cumsum(layer_thicknesses)]
-        layer_interface_planes = np.array([FCPart.makePlane(99999,
-                                                            99999,
-                                                            Base.Vector(self.vertices[0] + x),
-                                                            self.normal) for x in layer_interfaces])
+        layer_interface_planes = self.layer_interface_planes
 
         layer_solids = self.assembly.solids
         layer_solids.remove(self.assembly.features['pipe'])
@@ -522,66 +325,32 @@ class ActivatedReferenceFace(ReferenceFace):
 
         logger.info('Cell zones updated successfully')
 
-    # def generate_hole_part(self):
-    #
-    #     hull = self.assembly.hull
-    #     # export_objects([hull.fc_solid.Shape], 'hull_solid_test.stp')
-    #     # export_objects([x.fc_solid.Shape for x in self.assembly.solids], 'assembly_solid_test.stp')
-    #     inlet_outlet = hull.fc_solid.Shape.Shells[0].common(self.pipe.fc_solid.Shape)
-    #
-    #     if inlet_outlet.SubShapes.__len__() == 2:
-    #         inlet = Face(fc_face=inlet_outlet.SubShapes[0].removeSplitter(),
-    #                      name='Pipe_Inlet')
-    #         outlet = Face(fc_face=inlet_outlet.SubShapes[1].removeSplitter(),
-    #                       name='Pipe_Outlet')
-    #     else:
-    #         raise Exception('can not identify inlet and outlet')
-    #
-    #     # BOPTools.SplitAPI.booleanFragments([self.pipe.fc_solid.Shape, inlet.fc_face, outlet.fc_face], "Split", tolerance=1e-5)
-    #
-    #     pipe_faces = BOPTools.SplitAPI.slice(self.pipe.fc_solid.Shape.Shells[0], hull.fc_solid.Shape.Shells, "Split", 1e-3)
-    #
-    #     Solid(faces=[Face(fc_face=x) for x in pipe_faces.SubShapes[1].Faces]).save_fcstd('/tmp/pipe_hull.FCStd')
-    #
-    #     self.pipe.fc_solid.Shape.Area - (inlet.fc_face.Area + outlet.fc_face.Area)
-    #
-    #
-    #     splitted_pipe_faces = []
-    #     for solid in self.assembly.solids:
-    #         # side_faces = FCPart.makeShell([x.fc_face for x in solid.faces[2:]])
-    #         # check if common:
-    #         # export_objects([solid.fc_solid.Shape, self.pipe], 'second_intersection.stp')
-    #
-    #         common = solid.fc_solid.Shape.common(self.pipe.fc_solid.Shape.Shells[0])
-    #         if common.Faces:
-    #             new_faces = []
-    #             for face in solid.faces:
-    #                 new_face = Face(fc_face=face.fc_face.cut(self.pipe.fc_solid.Shape))
-    #                 new_faces.append(new_face)
-    #                 solid.update_face(face, new_face)
-    #             # cut = self.pipe.Shells[0].cut(solid.fc_solid.Shape)
-    #             common = self.pipe.fc_solid.Shape.Shells[0].common(solid.fc_solid.Shape)
-    #
-    #             pipe_faces = Face(fc_face=common.Shells[0])
-    #
-    #             # generate new layer solid with pipe faces:
-    #             new_faces.append(pipe_faces)
-    #             solid.faces = new_faces
-    #             solid.generate_solid_from_faces()
-    #
-    #             solid.features['pipe_faces'] = pipe_faces
-    #             splitted_pipe_faces.append(pipe_faces)
-    #
-    #     # generate pipe solid
-    #     pipe_solid = Solid(faces=[inlet, outlet, *splitted_pipe_faces],
-    #                        name='PipeSolid')
-    #     pipe_solid.generate_solid_from_faces()
-    #
-    #     pipe_solid.features['inlet'] = inlet
-    #     pipe_solid.features['outlet'] = outlet
-    #
-    #     self.assembly.solids.append(pipe_solid)
-    #     self.assembly.features['pipe'] = pipe_solid
+    def update_boundary_conditions(self):
+        logger.info('Updating boundary conditions...')
+
+        ref_normal = np.array(self.normal)
+
+        top_side_faces = []
+        bottom_side_faces = []
+
+        for face in self.comp_blocks.hull_faces:
+            if face.normal is NoNormal:
+                continue
+            if not (np.allclose(face.normal, ref_normal, 1e-3) or np.allclose(face.normal, -ref_normal, 1e-3)):
+                continue
+            # bottom side:
+            if self.layer_interface_planes[0].distToShape(FCPart.Vertex(Base.Vector(face.dirty_center)))[0] < 1e-3:
+                face.boundary = bottom_side_patch
+                bottom_side_faces.append(face)
+            elif self.layer_interface_planes[-1].distToShape(FCPart.Vertex(Base.Vector(face.dirty_center)))[0] < 1e-3:
+                face.boundary = top_side_patch
+                top_side_faces.append(face)
+
+        export_objects(FCPart.Compound([x.fc_face for x in self._comp_blocks.hull_faces]), '/tmp/hull_faces.FCStd')
+        export_objects(FCPart.Compound([x.fc_face for x in top_side_faces]), '/tmp/top_side_faces.FCStd')
+        export_objects(FCPart.Compound([x.fc_face for x in bottom_side_faces]), '/tmp/bottom_side_faces.FCStd')
+
+        logger.info('Updated boundary conditions successfully')
 
     def save_fcstd(self, filename):
         """
@@ -599,8 +368,10 @@ class ActivatedReferenceFace(ReferenceFace):
         _ = self.pipe_comp_blocks
         _ = self.free_comp_blocks
         _ = self.extruded_comp_blocks
+        _ = self.comp_blocks
 
         self.update_cell_zone()
+        self.update_boundary_conditions()
 
         block_mesh = BlockMesh(name=self.name)
         block_mesh.init_case()
@@ -618,27 +389,6 @@ class ActivatedReferenceFace(ReferenceFace):
 
         self.case.run()
 
-    # def generate_mesh(self):
-    #     pass
-    #
-    #     doc = App.newDocument("MeshTest")
-    #     __o__ = doc.addObject("Part::Feature", f'pipe_solid')
-    #     __o__.Shape = self.assembly.comp_solid
-    #     femmesh_obj = ObjectsFem.makeMeshGmsh(doc, self.name + "_Mesh")
-    #     doc.recompute()
-    #     doc.saveCopy('/tmp/test.FCStd')
-    #     gm = gt(femmesh_obj)
-    #     gm.update_mesh_data()
-    #     gm.get_tmp_file_paths("/tmp/fcgm_" + str(len), True)
-    #     gm.get_gmsh_command()
-    #     gm.write_gmsh_input_files()
-    #     error = gm.run_gmsh_with_geo()
-    #     print(error)
-    #     gm.read_and_set_new_mesh()
-    #     doc.recompute()
-    #
-    #     Block.save_fcstd('/tmp/blocks2.FCStd')
-
 
 def replace(arr, find, replace):
     # fast and readable
@@ -649,32 +399,3 @@ def replace(arr, find, replace):
         base = offset + 1
 
     return arr
-
-
-# def test_mesh_creation():
-#     # https://github.com/berndhahnebach/FreeCAD_bhb/blob/59c470dedf28da2632abfe6e4481ce09aaf6e233/src/Mod/Fem/femmesh/gmshtools.py#L906
-#     # more sophisticated example which changes the mesh size
-#     doc = App.newDocument("MeshTest")
-#     box_obj = doc.addObject("Part::Box", "Box")
-#     doc.recompute()
-#     box_obj.ViewObject.Visibility = False
-#     max_mesh_sizes = [0.5, 1, 2, 3, 5, 10]
-#     for len in max_mesh_sizes:
-#         quantity_len = "{}".format(len)
-#         print("\n\n Start length = {}".format(quantity_len))
-#         femmesh_obj = ObjectsFem.makeMeshGmsh(doc, box_obj.Name + "_Mesh")
-#         femmesh_obj.Part = box_obj
-#         femmesh_obj.CharacteristicLengthMax = "{}".format(quantity_len)
-#         femmesh_obj.CharacteristicLengthMin = "{}".format(quantity_len)
-#         doc.recompute()
-#         gm = GmshTools(femmesh_obj)
-#         gm.update_mesh_data()
-#         # set the tmp file path to some user path including the length
-#         gm.get_tmp_file_paths("/tmp/fcgm_" + str(len), True)
-#         gm.get_gmsh_command()
-#         gm.write_gmsh_input_files()
-#         error = gm.run_gmsh_with_geo()
-#         print(error)
-#         gm.read_and_set_new_mesh()
-#         doc.recompute()
-#         print("Done length = {}".format(quantity_len))
