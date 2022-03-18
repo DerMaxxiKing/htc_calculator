@@ -47,8 +47,6 @@ class Solid(object):
         self.state = kwargs.get('state', 'solid')
         self._obb = kwargs.get('obb', None)
 
-        print(self.Volume)
-
     @property
     def obb(self):
         if self._obb is None:
@@ -684,6 +682,7 @@ class PipeSolid(Solid):
             FCPart.export(__objs__, filename)
         except Exception as e:
             print(e)
+            raise e
 
     def __repr__(self):
         rep = f'Solid {self.name} {self.id}'

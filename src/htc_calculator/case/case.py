@@ -184,6 +184,7 @@ class OFCase(object):
 
         self.block_mesh.init_case()
 import uuid
+import os, stat
 
 from ..logger import logger
 from ..meshing.block_mesh import BlockMesh

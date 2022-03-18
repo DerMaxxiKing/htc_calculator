@@ -87,8 +87,8 @@ tabs1 = ActivatedReferenceFace(vertices=vertices,
                                name='test1')
 #
 # tabs1.generate_reference_geometry()
-tabs1.export_stl('/tmp/test_stls')
-tabs1.save_fcstd('/tmp/assembly.FCStd')
+# tabs1.export_stl('/tmp/test_stls')
+# tabs1.save_fcstd('/tmp/assembly.FCStd')
 # tabs1.create_o_grid()
 # tabs1.create_free_blocks()
 # tabs1.extrude_pipe_layer()

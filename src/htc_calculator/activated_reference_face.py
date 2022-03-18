@@ -11,6 +11,7 @@ from .meshing.block_mesh import Block, create_o_grid_blocks, create_blocks_from_
 from .logger import logger
 from .tools import export_objects, split_wire_by_projected_vertices
 from .case.case import OFCase
+from tqdm import tqdm, trange
 
 import FreeCAD
 import Part as FCPart
@@ -284,7 +285,7 @@ class ActivatedReferenceFace(ReferenceFace):
         wire = self.pipe.pipe_wire
         blocks = []
 
-        for i, edge in enumerate(wire.Edges):
+        for i, edge in enumerate(tqdm(wire.Edges, desc='creating o-grid')):
 
             if i == 0:
                 outer_pipe = False
@@ -299,7 +300,7 @@ class ActivatedReferenceFace(ReferenceFace):
                 inlet = False
                 outlet = False
 
-            logger.info(f'creating block {i} of {wire.Edges.__len__()}')
+            # logger.info(f'creating block {i} of {wire.Edges.__len__()}')
 
             new_blocks = self.pipe_section.create_block(edge=edge,
                                                         face_normal=self.normal,
@@ -439,9 +440,9 @@ class ActivatedReferenceFace(ReferenceFace):
         # export_objects([x.fc_solid for x in [*self.pipe_comp_blocks.blocks, *self.free_comp_blocks.blocks]], '/tmp/initial_blocks.FCStd')
 
         new_blocks = []
-        for block in [*self.pipe_comp_blocks.blocks, *self.free_comp_blocks.blocks]:
+        for block in tqdm([*self.pipe_comp_blocks.blocks, *self.free_comp_blocks.blocks], desc='extruding layer blocks'):
             if block.pipe_layer_top:
-                logger.debug(f'Extruding block top {block}')
+                # logger.debug(f'Extruding block top {block}')
                 faces_to_extrude = np.array(block.faces)[np.array(block.pipe_layer_extrude_top)]
                 for face in faces_to_extrude:
                     extrude_to = face.vertices[0].fc_vertex.toShape().distToShape(layer_interface_planes[0])[0] < np.cumsum(layer_thicknesses)
@@ -451,7 +452,7 @@ class ActivatedReferenceFace(ReferenceFace):
                         new_blocks.append(new_block)
                         ext_dist = dist
             if block.pipe_layer_bottom:
-                logger.debug(f'Extruding block bottom {block}')
+                # logger.debug(f'Extruding block bottom {block}')
                 faces_to_extrude = np.array(block.faces)[np.array(block.pipe_layer_extrude_bottom)]
                 # export_objects([block.fc_solid, faces_to_extrude[0].fc_face], '/tmp/test.FCStd')
                 for face in faces_to_extrude:

@@ -142,8 +142,6 @@ class LayerDefinition(object):
 
         self._layer_setup_dict = None
 
-        print('initialized')
-
     @property
     def n_surface_layers(self):
         return self._n_surface_layers
@@ -157,7 +155,6 @@ class LayerDefinition(object):
             return
         self._n_surface_layers = value
         self.write_layer_setup()
-        print(f'n_surface_layers updated to {value}')
 
     @property
     def relative_sizes(self):
@@ -169,7 +166,6 @@ class LayerDefinition(object):
             return
         self._relative_sizes = value
         self.write_layer_setup()
-        print(f'relative_sizes updated to {value}')
 
     @property
     def expansion_ratio(self):
@@ -491,4 +487,3 @@ if __name__ == '__main__':
     new = LayerDefinition()
     new.write_layer_setup()
     print(new.layer_setup_dict)
-

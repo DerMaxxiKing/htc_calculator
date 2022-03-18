@@ -110,6 +110,7 @@ class Face(object):
                 os.remove(tmp_file)
             except Exception as e:
                 print(e)
+                raise e
 
         logger.debug(f'    created stl string for face {self.id}...')
 
@@ -213,7 +214,7 @@ class Face(object):
             geo.addPlaneSurface([1], 1)
             gmsh.model.geo.synchronize()
 
-            gmsh.option.setNumber("General.Terminal", 1)
+            gmsh.option.setNumber("General.Terminal", 0)
             gmsh.option.setNumber("Mesh.MeshSizeMin", 1)
             gmsh.option.setNumber("Mesh.MeshSizeMax", lc)
 
@@ -230,7 +231,7 @@ class Face(object):
 
             # recombine to quad mesh
             # https://gitlab.onelab.info/gmsh/gmsh/-/issues/784
-            gmsh.option.setNumber('General.Terminal', 1)
+            gmsh.option.setNumber('General.Terminal', 0)
             # gmsh.model.mesh.setRecombine(2, 1)
             # gmsh.option.setNumber('SubdivisionAlgorithm ', 2)
             gmsh.model.mesh.recombine()
@@ -244,8 +245,6 @@ class Face(object):
             raise e
 
         gmsh.finalize()
-
-
 
         return mesh
 

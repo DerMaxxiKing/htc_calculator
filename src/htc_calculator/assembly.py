@@ -507,7 +507,7 @@ regions
         s = s.replace('<vertices>', vertices)
 
         blocks = f"blocks\n(\n{''.join(blocks)});\n"
-        print(blocks)
+        # print(blocks)
         s = s.replace('<blocks>', blocks)
 
         edges = 'edges\n(\n);\n'
