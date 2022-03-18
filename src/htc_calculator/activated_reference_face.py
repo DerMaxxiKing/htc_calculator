@@ -282,6 +282,9 @@ class ActivatedReferenceFace(ReferenceFace):
             FCPart.export(doc.Objects, filename)
 
     def create_o_grid_with_section(self):
+
+        logger.info(f'Generation o-grid blocks for pipe...')
+
         wire = self.pipe.pipe_wire
         blocks = []
 
@@ -311,7 +314,7 @@ class ActivatedReferenceFace(ReferenceFace):
                                                         outlet=outlet)
             blocks.append(new_blocks)
 
-        logger.info(f'Finished Pipe Block generation successfully\n\n')
+        logger.info(f'Finished pipe o-grid block generation successfully\n\n')
         block_list = functools.reduce(operator.iconcat, blocks, [])
         pipe_comp_block = CompBlock(name='Pipe Blocks',
                                     blocks=block_list)
@@ -499,7 +502,7 @@ class ActivatedReferenceFace(ReferenceFace):
         #     FCPart.Vertex(tuple(x.dirty_center)))[0] < layer_thicknesses) - 1])
         #      for x in check_blocks if x.cell_zone is None]
 
-        for block in check_blocks:
+        for block in tqdm(check_blocks, desc='Updating cell zones'):
             if block.cell_zone is not None:
                 continue
             try:

@@ -47,7 +47,7 @@ class ReferenceFace(object):
     def __init__(self, *args, **kwargs):
 
         self.id = kwargs.get('id', uuid.uuid4())
-        logger.debug(f'initializing ReferenceFace {self.id}...')
+        # logger.debug(f'initializing ReferenceFace {self.id}...')
         self.name = kwargs.get('name', None)
         self._normal = kwargs.get('normal', None)
 
@@ -73,7 +73,7 @@ class ReferenceFace(object):
         self.plane_mesh_size = kwargs.get('plane_mesh_size', 250)
         self.thickness_mesh_size = kwargs.get('plane_mesh_size', 25)
 
-        logger.debug(f'    initialized ReferenceFace {self.id}')
+        # logger.debug(f'    initialized ReferenceFace {self.id}')
 
     @property
     def points(self):

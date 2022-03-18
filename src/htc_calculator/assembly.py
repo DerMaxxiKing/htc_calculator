@@ -35,7 +35,7 @@ class Assembly(object):
 
     def __init__(self, *args, **kwargs):
         self.id = kwargs.get('id', uuid.uuid4())
-        logger.debug(f'initializing Assembly {self.id}')
+        # logger.debug(f'initializing Assembly {self.id}')
 
         self.name = kwargs.get('name', None)
         self.normal = kwargs.get('normal', None)

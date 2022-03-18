@@ -33,7 +33,7 @@ class Solid(object):
     def __init__(self, *args, **kwargs):
         self.id = kwargs.get('id', uuid.uuid4())
         self.type = kwargs.get('type', None)
-        logger.debug(f'initializing solid {self.id}')
+        # logger.debug(f'initializing solid {self.id}')
         self.name = kwargs.get('name', None)
         self.normal = kwargs.get('normal', None)
         self._fc_solid = kwargs.get('fc_solid', None)
@@ -152,7 +152,7 @@ class Solid(object):
 
     def generate_solid_from_faces(self):
 
-        logger.debug(f'generating solid from faces: {self.id}')
+        # logger.debug(f'generating solid from faces: {self.id}')
         start_time = time.time()
 
         faces = []
@@ -165,16 +165,16 @@ class Solid(object):
         if not solid.isClosed():
             logger.error(f'Solid {self.id}: solid is not closed')
 
-        doc_start_time = time.time()
+        # doc_start_time = time.time()
         doc = App.newDocument()
         __o__ = doc.addObject("Part::Feature", f'{str(self.id)}')
         __o__.Label = f'{str(self.id)}'
         __o__.Shape = solid
-        logger.debug(f'        doc time: {time.time() - doc_start_time} s')
+        # logger.debug(f'        doc time: {time.time() - doc_start_time} s')
 
         self.fc_solid = __o__
 
-        logger.debug(f'    finished generation of solid from faces: {self.id} in {time.time() - start_time} s')
+        # logger.debug(f'    finished generation of solid from faces: {self.id} in {time.time() - start_time} s')
 
         return self.fc_solid
 

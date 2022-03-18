@@ -24,7 +24,7 @@ class Face(object):
     def __init__(self, *args, **kwargs):
 
         self.id = kwargs.get('id', uuid.uuid4())
-        logger.debug(f'initializing face {self.id}')
+        # logger.debug(f'initializing face {self.id}')
         start_time = time.time()
 
         self.name = kwargs.get('name', None)
@@ -32,7 +32,7 @@ class Face(object):
 
         self.fc_face = kwargs.get('fc_face', None)
 
-        logger.debug(f'    finished initializing face {self.id} in {time.time() - start_time} s')
+        # logger.debug(f'    finished initializing face {self.id} in {time.time() - start_time} s')
 
         self._surface_mesh_setup = kwargs.get('_surface_mesh_setup',
                                               kwargs.get('surface_mesh_setup', default_surface_mesh_parameter))
