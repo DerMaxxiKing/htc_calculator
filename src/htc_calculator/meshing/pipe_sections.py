@@ -2,7 +2,7 @@ import numpy as np
 import copy
 
 from ..logger import logger
-from .block_mesh import BlockMeshVertex, BlockMeshEdge, Block, unit_vector, create_edges_between_layers, pipe_wall_patch, inlet_patch, outlet_patch
+from .block_mesh import BlockMeshVertex, BlockMeshEdge, Block, unit_vector, create_edges_between_layers, pipe_wall_patch, inlet_patch, outlet_patch, wall_patch
 from ..geo_tools import get_position
 from ..tools import vector_to_np_array, perpendicular_vector, export_objects
 
@@ -21,7 +21,9 @@ class PipeSection(object):
         self.edge_def = kwargs.get('edge_def')                                      # List with vertex-ids for inner and outer edges
         self.vertex_indices = kwargs.get('vertex_indices')                          #
         self.edge_indices = kwargs.get('edge_indices')                              #
-        self.cell_zones = kwargs.get('cell_zones')                                  #
+        self.cell_zones = kwargs.get('cell_zones')  #
+        self.block_cell_zones = kwargs.get('block_cell_zones')                                  #
+        self.cell_zone_ids = kwargs.get('cell_zone_ids')                                  #
 
         self.n_cell = kwargs.get('n_cell')                                          #
         self.cell_size = kwargs.get('cell_size')
@@ -31,10 +33,22 @@ class PipeSection(object):
         self.block_inlet_faces = kwargs.get('block_inlet_faces')
         self.block_outlet_faces = kwargs.get('block_outlet_faces')
 
-        self.materials = kwargs.get('materials', [])
+        self._materials = kwargs.get('materials', [])
 
         self.top_side = kwargs.get('top_side', dict())
         self.bottom_side = kwargs.get('bottom_side', dict())
+
+    @property
+    def materials(self):
+        return self._materials
+
+    @materials.setter
+    def materials(self, value):
+        if value is not None:
+            self._materials = value
+        for i, material in enumerate(self._materials):
+            if self.cell_zones is not None:
+                self.cell_zones[i].material = material
 
     def create_block(self, *args, **kwargs):
 
@@ -57,11 +71,11 @@ class PipeSection(object):
 
         if outer_pipe:
             block_vertex_indices = [*self.vertex_indices[0], *self.vertex_indices[1]]
-            block_cell_zones = [*self.cell_zones[0], *self.cell_zones[1]]
+            block_cell_zones = [*self.block_cell_zones[0], *self.block_cell_zones[1]]
             block_edge_indices = [*self.edge_indices[0], *self.edge_indices[1]]
         else:
             block_vertex_indices = self.vertex_indices[0]
-            block_cell_zones = self.cell_zones[0]
+            block_cell_zones = self.block_cell_zones[0]
             block_edge_indices = self.edge_indices[0]
 
         blocks = []
@@ -102,8 +116,8 @@ class PipeSection(object):
                 pipe_layer_extrude_bottom = None
 
             if cell_zones is not None:
-                block_name = self.materials[cell_zones].name
-                cell_zone = self.materials[cell_zones]
+                block_name = cell_zones.material.name
+                cell_zone = cell_zones
             else:
                 block_name = None
                 cell_zone = None
@@ -123,7 +137,9 @@ class PipeSection(object):
 
             blocks.append(new_block)
 
-        _ = [[setattr(blocks[xx[0]].faces[yy], 'boundary', pipe_wall_patch) for yy in xx[1]] for xx in self.pipe_wall_def]
+        if not outer_pipe:
+            _ = [[setattr(blocks[xx[0]].faces[yy], 'boundary', wall_patch)
+                  for yy in xx[1]] for xx in self.pipe_wall_def]
 
         if inlet:
             for block_inlet in self.block_inlet_faces:

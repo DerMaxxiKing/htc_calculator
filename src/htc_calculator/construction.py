@@ -1,5 +1,6 @@
 import os
 import uuid
+from abc import ABCMeta, abstractmethod
 
 try:
     import importlib.resources as pkg_resources
@@ -8,10 +9,15 @@ except ImportError:
     import importlib_resources as pkg_resources
 
 
+from .config import n_proc
 from .case import case_resources
+from .case.case_resources import solid as solid_resources
+from .case.case_resources import fluid as fluid_resources
+from .case.case_resources.solid import static as static_solid_resources
+from .case.case_resources.fluid import static as static_fluid_resources
 
 
-class Material(object):
+class Material(object, metaclass=ABCMeta):
 
     def __init__(self, *args, **kwargs):
 
@@ -22,10 +28,26 @@ class Material(object):
         self.specific_heat_capacity = kwargs.get('specific_heat_capacity', 1000)        # J / kg K
         self.heat_conductivity = kwargs.get('heat_conductivity', 1000)                  # W / m K
 
-        self._thermo_physical_properties_entry = None
-
         self.mol_weight = 1
         self.hf = 0
+
+        self._fvschemes = None
+        self._fvsolution = None
+        self._thermo_physical_properties_entry = None
+        self._decompose_par_dict = None
+
+        self.boundaries = kwargs.get('boundaries', {})
+        self.initial_temperature = kwargs.get('initial_temperature', 273.15 + 20)
+
+    @property
+    @abstractmethod
+    def fvschemes(self):
+        return self._fvschemes
+
+    @property
+    @abstractmethod
+    def fvsolution(self):
+        return self._fvsolution
 
     @property
     def txt_id(self):
@@ -40,11 +62,21 @@ class Material(object):
             self._thermo_physical_properties_entry = self.generate_thermo_physical_properties_entry()
         return self._thermo_physical_properties_entry
 
+    @property
+    def decompose_par_dict(self):
+        if self._decompose_par_dict is None:
+            tp_entry = pkg_resources.read_text(case_resources, 'decomposeParDict')
+            tp_entry = tp_entry.replace('<n_proc>', str(n_proc))
+            self._decompose_par_dict = tp_entry
+        return self._decompose_par_dict
+
     def init_directory(self, case_dir):
         os.makedirs(os.path.join(case_dir, 'constant', str(self.txt_id)), exist_ok=True)
+        os.makedirs(os.path.join(case_dir, 'system', str(self.txt_id)), exist_ok=True)
+        os.makedirs(os.path.join(case_dir, '0', str(self.txt_id)), exist_ok=True)
 
     def generate_thermo_physical_properties_entry(self):
-        tp_entry = pkg_resources.read_text(case_resources, 'solid_thermophysicalProperties')
+        tp_entry = pkg_resources.read_text(solid_resources, 'thermophysicalProperties')
         tp_entry = tp_entry.replace('<material_id>', self.txt_id)
         tp_entry = tp_entry.replace('<material_name>', str(self.name))
         tp_entry = tp_entry.replace('<molWeight>', str(self.mol_weight))
@@ -60,6 +92,24 @@ class Material(object):
         with open(full_filename, "w") as f:
             f.write(self.thermo_physical_properties_entry)
 
+    def write_decompose_par_dict(self, case_dir):
+        os.makedirs(os.path.join(case_dir, 'system', str(self.txt_id)), exist_ok=True)
+        full_filename = os.path.join(case_dir, 'system', str(self.txt_id), 'decomposeParDict')
+        with open(full_filename, "w") as f:
+            f.write(self.decompose_par_dict)
+
+    def write_fvschemes(self, case_dir):
+        os.makedirs(os.path.join(case_dir, 'system', str(self.txt_id)), exist_ok=True)
+        full_filename = os.path.join(case_dir, 'system', str(self.txt_id), 'fvSchemes')
+        with open(full_filename, "w") as f:
+            f.write(self.fvschemes)
+
+    def write_fvsolution(self, case_dir):
+        os.makedirs(os.path.join(case_dir, 'system', str(self.txt_id)), exist_ok=True)
+        full_filename = os.path.join(case_dir, 'system', str(self.txt_id), 'fvSolution')
+        with open(full_filename, "w") as f:
+            f.write(self.fvsolution)
+
 
 class Solid(Material):
 
@@ -67,9 +117,24 @@ class Solid(Material):
         Material.__init__(self, *args, **kwargs)
         self.roughness = kwargs.get('roughness', None)
 
+    @property
+    def fvschemes(self):
+        if self._fvschemes is None:
+            self._fvschemes = pkg_resources.read_text(static_solid_resources, 'fvSchemes')
+        return self._fvschemes
+
+    @property
+    def fvsolution(self):
+        if self._fvsolution is None:
+            self._fvsolution = pkg_resources.read_text(static_solid_resources, 'fvSolution')
+        return self._fvsolution
+
     def write_to_of(self, case_dir):
         self.init_directory(case_dir),
         self.write_thermo_physical_properties(case_dir)
+        self.write_decompose_par_dict(case_dir)
+        self.write_fvschemes(case_dir)
+        self.write_fvsolution(case_dir)
 
     def __repr__(self):
         return f'Solid material {self.name} ({self.id})'
@@ -97,6 +162,18 @@ class Fluid(Material):
             return str(self.id)
 
     @property
+    def fvschemes(self):
+        if self._fvschemes is None:
+            self._fvschemes = pkg_resources.read_text(static_fluid_resources, 'fvSchemes')
+        return self._fvschemes
+
+    @property
+    def fvsolution(self):
+        if self._fvsolution is None:
+            self._fvsolution = pkg_resources.read_text(static_fluid_resources, 'fvSolution')
+        return self._fvsolution
+
+    @property
     def thermo_physical_properties_entry(self):
         if self._thermo_physical_properties_entry is None:
             self._thermo_physical_properties_entry = self.generate_thermo_physical_properties_entry()
@@ -121,7 +198,7 @@ class Fluid(Material):
         return self._momentum_transport_entry
 
     def generate_thermo_physical_properties_entry(self):
-        entry = pkg_resources.read_text(case_resources, 'fluid_thermophysicalProperties')
+        entry = pkg_resources.read_text(fluid_resources, 'thermophysicalProperties')
         entry = entry.replace('<material_id>', self.txt_id)
         entry = entry.replace('<material_name>', str(self.name))
         entry = entry.replace('<molWeight>', str(self.mol_weight))
@@ -132,20 +209,20 @@ class Fluid(Material):
         return entry
 
     def generate_g_entry(self):
-        entry = pkg_resources.read_text(case_resources, 'g')
+        entry = pkg_resources.read_text(fluid_resources, 'g')
         entry = entry.replace('<material_id>', self.txt_id)
         entry = entry.replace('<material_name>', str(self.name))
         return entry
 
     def generate_thermo_physic_transport_entry(self):
-        entry = pkg_resources.read_text(case_resources, 'thermophysicalTransport')
+        entry = pkg_resources.read_text(fluid_resources, 'thermophysicalTransport')
         entry = entry.replace('<material_id>', self.txt_id)
         entry = entry.replace('<material_name>', str(self.name))
         entry = entry.replace('<prt>', str(self.prt))
         return entry
 
     def generate_momentum_transport_entry(self):
-        entry = pkg_resources.read_text(case_resources, 'momentumTransport')
+        entry = pkg_resources.read_text(fluid_resources, 'momentumTransport')
         entry = entry.replace('<material_name>', str(self.name))
         entry = entry.replace('<material_id>', self.txt_id)
         return entry
@@ -183,6 +260,9 @@ class Fluid(Material):
         self.write_thermo_physic_transport(case_dir)
         self.write_momentum_transport(case_dir)
         self.write_g(case_dir)
+        self.write_decompose_par_dict(case_dir)
+        self.write_fvschemes(case_dir)
+        self.write_fvsolution(case_dir)
 
     def __repr__(self):
         return f'Fluid material {self.name} ({self.id})'
@@ -197,6 +277,8 @@ class Layer(object):
         self.material = kwargs.get('material', None)
         self.thickness = kwargs.get('thickness', None)
         self.solid = None
+
+        self.initial_temperature = kwargs.get('initial_temperature', 293.15)
 
     @property
     def txt_id(self):

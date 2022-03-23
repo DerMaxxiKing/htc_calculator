@@ -1,12 +1,16 @@
+import time
 import uuid
 import os
 import stat
+import subprocess
 
 from ..logger import logger
-from ..meshing.block_mesh import BlockMesh
+from ..meshing.block_mesh import BlockMesh, inlet_patch, outlet_patch, wall_patch, pipe_wall_patch, top_side_patch, \
+    bottom_side_patch, CellZone, BlockMeshBoundary
 from ..construction import write_region_properties
 
 from PyFoam.Applications.Decomposer import Decomposer
+from .of_parser import CppDictParser
 
 try:
     import importlib.resources as pkg_resources
@@ -27,11 +31,13 @@ class OFCase(object):
         self.name = kwargs.get('name', 'unnamed case')
         self.reference_face = kwargs.get('reference_face')
 
-        self._control_dict = None
+        self.n_proc = kwargs.get('n_proc', 8)
+
         self._case_dir = None
         self._block_mesh = None
 
         self._control_dict = None
+        self._decompose_par_dict = None
         self._fvschemes = None
         self._fvsolution = None
 
@@ -91,6 +97,14 @@ class OFCase(object):
             self._fvsolution = pkg_resources.read_text(case_resources, 'fvSolution')
         return self._fvsolution
 
+    @property
+    def decompose_par_dict(self):
+        if self._decompose_par_dict is None:
+            tp_entry = pkg_resources.read_text(case_resources, 'decomposeParDict')
+            tp_entry = tp_entry.replace('<n_proc>', str(self.n_proc))
+            self._decompose_par_dict = tp_entry
+        return self._decompose_par_dict
+
     @fvsolution.setter
     def fvsolution(self, value):
         if value == self._fvsolution:
@@ -142,9 +156,9 @@ class OFCase(object):
         os.makedirs(os.path.join(self.case_dir, 'constant'), exist_ok=True)
         os.makedirs(os.path.join(self.case_dir, 'system'), exist_ok=True)
 
-        self.write_all_mesh()
-        self.write_all_run()
-        self.write_all_clean()
+        # self.write_all_mesh()
+        # self.write_all_run()
+        # self.write_all_clean()
 
     def write_all_mesh(self):
         all_mesh_full_filename = os.path.join(self.case_dir, "Allmesh")
@@ -176,6 +190,44 @@ class OFCase(object):
         with open(os.path.join(self.case_dir, 'system', "fvSolution"), "w") as f:
             f.write(self.fvsolution)
 
+    def write_decompose_par_dict(self):
+        with open(os.path.join(self.case_dir, 'system', "decomposeParDict"), "w") as f:
+            f.write(self.decompose_par_dict)
+
+    def run_block_mesh(self):
+        logger.info(f'Creating block mesh....')
+        time.sleep(0.5)
+        res = subprocess.run(["/bin/bash", "-i", "-c", "blockMesh 2>&1 | tee blockMesh.log"],
+                             capture_output=True,
+                             cwd=self.case_dir,
+                             user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            logger.info(f"Successfully created block mesh: \n\n {output[output.find('Mesh Information'):]}")
+        else:
+            logger.error(f"{res.stderr.decode('ascii')}")
+            raise Exception(f"Error creating block Mesh:\n{res.stderr.decode('ascii')}")
+
+        return True
+
+    def run_split_mesh_regions(self):
+        logger.info(f'Splitting Mesh Regions....')
+        res = subprocess.run(
+            ["/bin/bash", "-i", "-c", "splitMeshRegions -cellZones -overwrite 2>&1 | tee splitMeshRegions.log"],
+            capture_output=True,
+            cwd=self.case_dir,
+            user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            if output.find('FOAM FATAL ERROR') != -1:
+                logger.error(f'Error splitting Mesh Regions:\n\n{output}')
+                raise Exception(f'Error splitting Mesh Regions:\n\n{output}')
+            logger.info(f"Successfully splitted Mesh Regions \n\n{output}")
+        else:
+            logger.error(f"{res.stderr.decode('ascii')}")
+
+        return True
+
     def run(self):
 
         _ = self.reference_face.pipe_comp_blocks
@@ -188,12 +240,42 @@ class OFCase(object):
 
         self.block_mesh.init_case()
 
+        self.write_control_dict()
+        self.write_decompose_par_dict()
         self.write_all_mesh()
         self.write_all_run()
+        self.write_all_clean()
 
         for cell_zone in comp_blocks.cell_zones:
             cell_zone.write_to_of(self.case_dir)
         # write region properties:
         write_region_properties(comp_blocks.cell_zones, self.case_dir)
+
+        self.run_block_mesh()
+        self.run_split_mesh_regions()
+
+        for cell_zone in comp_blocks.cell_zones:
+            of_dict = CppDictParser.from_file(os.path.join(self.case_dir, 'constant',
+                                                           cell_zone.txt_id, 'polyMesh', 'boundary'))
+            boundary_dict = {k: v for k, v in of_dict.values.items() if (v and (k != 'FoamFile'))}
+
+            boundaries = []
+            for key, value in boundary_dict.items():
+                boundary = BlockMeshBoundary.get_boundary_by_txt_id(key)
+                if boundary is None:
+                    if '_to_' in key:
+                        # create interface
+                        boundaries.append(BlockMeshBoundary(name=key,
+                                                            type='interface',
+                                                            n_faces=value['nFaces'],
+                                                            start_face=value['startFace']))
+                else:
+                    boundary.n_faces = value['nFaces']
+                    boundary.startFace = value['startFace']
+                    boundaries.append(boundary)
+
+            cell_zone.boundaries = boundaries
+
+
 
         logger.debug('bla bla')

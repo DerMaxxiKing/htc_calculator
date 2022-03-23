@@ -8,7 +8,7 @@ from .tools import project_point_on_line, export_objects
 from .face import Face
 from .solid import Solid, PipeSolid
 from .meshing.block_mesh import create_blocks_from_2d_mesh, BlockMesh, \
-    CompBlock, NoNormal, bottom_side_patch, top_side_patch
+    CompBlock, NoNormal, bottom_side_patch, top_side_patch, CellZone, wall_patch
 from .logger import logger
 from .tools import export_objects, split_wire_by_projected_vertices
 from .case.case import OFCase
@@ -154,7 +154,7 @@ class ActivatedReferenceFace(ReferenceFace):
         wire = self.pipe.pipe_wire
         blocks = []
 
-        for i, edge in enumerate(tqdm(wire.Edges, desc='creating o-grid')):
+        for i, edge in enumerate(tqdm(wire.Edges, desc='creating o-grid', colour="green")):
 
             if i == 0:
                 outer_pipe = False
@@ -251,7 +251,9 @@ class ActivatedReferenceFace(ReferenceFace):
         # export_objects([x.fc_solid for x in [*self.pipe_comp_blocks.blocks, *self.free_comp_blocks.blocks]], '/tmp/initial_blocks.FCStd')
 
         new_blocks = []
-        for block in tqdm([*self.pipe_comp_blocks.blocks, *self.free_comp_blocks.blocks], desc='extruding layer blocks'):
+        for block in tqdm([*self.pipe_comp_blocks.blocks, *self.free_comp_blocks.blocks],
+                          desc='extruding layer blocks',
+                          colour="green"):
             if block.pipe_layer_top:
                 # logger.debug(f'Extruding block top {block}')
                 faces_to_extrude = np.array(block.faces)[np.array(block.pipe_layer_extrude_top)]
@@ -305,15 +307,17 @@ class ActivatedReferenceFace(ReferenceFace):
         #     FCPart.Vertex(tuple(x.dirty_center)))[0] < layer_thicknesses) - 1])
         #      for x in check_blocks if x.cell_zone is None]
 
-        for block in tqdm(check_blocks, desc='Updating cell zones'):
+        for block in tqdm(check_blocks, desc='Updating cell zones', colour="green"):
             if block.cell_zone is not None:
-                continue
+                if block.cell_zone.material is not None:
+                    continue
             try:
 
                 # block.cell_zone = layer_materials[np.argmax(layer_interface_planes[0].distToShape(
                 #     FCPart.Vertex(block.fc_solid.CenterOfGravity))[0] < layer_thicknesses) - 1]
-                block.cell_zone = layer_materials[np.argmax(layer_interface_planes[0].distToShape(
+                material = layer_materials[np.argmax(layer_interface_planes[0].distToShape(
                     FCPart.Vertex(tuple(block.dirty_center)))[0] < layer_thicknesses) - 1]
+                block.cell_zone = CellZone(material=material)
             except Exception as e:
                 raise e
 
@@ -335,8 +339,14 @@ class ActivatedReferenceFace(ReferenceFace):
 
         for face in self.comp_blocks.hull_faces:
             if face.normal is NoNormal:
+                if face.blocks.__len__() == 1:
+                    if face.boundary is None:
+                        face.boundary = wall_patch
                 continue
             if not (np.allclose(face.normal, ref_normal, 1e-3) or np.allclose(face.normal, -ref_normal, 1e-3)):
+                if face.blocks.__len__() == 1:
+                    if face.boundary is None:
+                        face.boundary = wall_patch
                 continue
             # bottom side:
             if self.layer_interface_planes[0].distToShape(FCPart.Vertex(Base.Vector(face.dirty_center)))[0] < 1e-3:
@@ -346,9 +356,10 @@ class ActivatedReferenceFace(ReferenceFace):
                 face.boundary = top_side_patch
                 top_side_faces.append(face)
 
-        export_objects(FCPart.Compound([x.fc_face for x in self._comp_blocks.hull_faces]), '/tmp/hull_faces.FCStd')
-        export_objects(FCPart.Compound([x.fc_face for x in top_side_faces]), '/tmp/top_side_faces.FCStd')
-        export_objects(FCPart.Compound([x.fc_face for x in bottom_side_faces]), '/tmp/bottom_side_faces.FCStd')
+        # export_objects([x.fc_face for x in self._comp_blocks.hull_faces], '/tmp/hull_faces.FCStd')
+        # export_objects(FCPart.Compound([x.fc_face for x in self._comp_blocks.hull_faces]), '/tmp/hull_faces.FCStd')
+        # export_objects(FCPart.Compound([x.fc_face for x in top_side_faces]), '/tmp/top_side_faces.FCStd')
+        # export_objects(FCPart.Compound([x.fc_face for x in bottom_side_faces]), '/tmp/bottom_side_faces.FCStd')
 
         logger.info('Updated boundary conditions successfully')
 

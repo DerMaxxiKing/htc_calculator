@@ -1,5 +1,5 @@
 from ...logger import logger
-from ..block_mesh import BlockMeshVertex, BlockMeshEdge, unit_vector
+from ..block_mesh import BlockMeshVertex, BlockMeshEdge, unit_vector, CellZone
 from ..pipe_sections import PipeSection
 from ...buildin_materials import water
 import numpy as np
@@ -146,14 +146,35 @@ n_cell = [10, 10, None]
 # size of cells in mm; if None n_cell must be defined
 cell_size = [None, None, 50]
 
-cell_zones = [0, 0, 0, 0, 0]
-outer_cell_zones = [1, 1, 1, 1, None, None, None, None]
+inner_cell_zone = CellZone(new=True)
+outer_cell_zone = CellZone(new=True)
+undefined_cell_zone = CellZone(new=True)
+
+cell_zones = [inner_cell_zone, outer_cell_zone, undefined_cell_zone]
+
+cell_zone_ids = [0, 0, 0, 0, 0]
+outer_cell_zones_ids = [1, 1, 1, 1, None, None, None, None]
+
+block_cell_zones = [inner_cell_zone,
+                    inner_cell_zone,
+                    inner_cell_zone,
+                    inner_cell_zone,
+                    inner_cell_zone]
+
+outer_block_cell_zones = [outer_cell_zone,
+                          outer_cell_zone,
+                          outer_cell_zone,
+                          outer_cell_zone,
+                          None,
+                          None,
+                          None,
+                          None]
 
 # id of block, id of faces which are pipe wall
-pipe_wall_def = [(1, [5]),
+pipe_wall_def = [(1, [3]),
                  (2, [3]),
-                 (3, [4]),
-                 (4, [2])]
+                 (3, [3]),
+                 (4, [3])]
 
 block_inlet_faces = [(0, [0]),
                      (1, [0]),
@@ -173,13 +194,14 @@ block_outlet_faces = [(0, [1]),
 top_side = {11: [3]}          # block id, face id
 bottom_side = {9: [3]}       # block id, face id
 
-
 pipe_section = PipeSection(name='Plain Tube',
                            layer_vertex_gen_function=vertex_gen_fcn,
                            edge_def=[edge_def, outer_edge_def],
                            vertex_indices=[vertex_indices, outer_vertex_indices],
                            edge_indices=[edge_indices, outer_edge_indices],
-                           cell_zones=[cell_zones, outer_cell_zones],
+                           cell_zones=cell_zones,
+                           block_cell_zones=[block_cell_zones, outer_block_cell_zones],
+                           cell_zone_ids=[cell_zone_ids, outer_cell_zones_ids],
                            n_cell=n_cell,
                            cell_size=cell_size,
                            pipe_wall_def=pipe_wall_def,

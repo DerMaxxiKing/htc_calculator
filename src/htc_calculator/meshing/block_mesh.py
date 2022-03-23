@@ -7,6 +7,7 @@ from functools import lru_cache, wraps
 from ..logger import logger
 from ..tools import vector_to_np_array, perpendicular_vector, export_objects, angle_between_vectors, array_row_intersection
 from ..geo_tools import search_contacts, surfaces_in_contact, get_position
+from ..construction import Solid, Fluid
 # import trimesh
 
 import FreeCAD
@@ -24,6 +25,13 @@ except ImportError:
     import importlib_resources as pkg_resources
 
 from . import meshing_resources as msh_resources
+
+from ..config import n_proc
+from ..case import case_resources
+from ..case.case_resources import solid as solid_resources
+from ..case.case_resources import fluid as fluid_resources
+from ..case.case_resources.solid import static as static_solid_resources
+from ..case.case_resources.fluid import static as static_fluid_resources
 
 App = FreeCAD
 
@@ -150,6 +158,12 @@ class BoundaryMetaMock(type):
 
     instances = {}
 
+    def get_boundary_by_name(cls, name):
+        return next((x for x in cls.instances if x.name == name), None)
+
+    def get_boundary_by_txt_id(cls, txt_id):
+        return next((cls.instances[key] for key, value in cls.instances.items() if (value.txt_id + '_' + value.name) == txt_id), None)
+
     def __call__(cls, *args, **kwargs):
 
         obj = cls.__new__(cls, *args, **kwargs)
@@ -181,6 +195,29 @@ class BlockMetaMock(type):
         obj.__init__(*args, **kwargs)
         cls.instances.append(obj)
         cls._comp_solid = None
+        return obj
+
+
+class CellZoneMetaMock(type):
+
+    instances = []
+
+    @staticmethod
+    def get_cell_zone(material):
+        # logger.debug('Getting CellZone...')
+        return next((x for x in CellZoneMetaMock.instances if x.material is material), None)
+
+    def __call__(cls, *args, **kwargs):
+        material = kwargs.get('material', None)
+        new = kwargs.get('new', False)
+
+        obj = None
+        if not new:
+            obj = cls.get_cell_zone(material)
+        if obj is None:
+            obj = cls.__new__(cls, *args, **kwargs)
+            obj.__init__(*args, **kwargs)
+            cls.instances.append(obj)
         return obj
 
 
@@ -557,6 +594,18 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         self.type = kwargs.get('type')
         self._faces = kwargs.get('faces', set())
 
+        self.n_faces = kwargs.get('n_faces', None)
+        self.start_face = kwargs.get('start_face', None)
+
+        self.alphat = kwargs.get('alphat', None)
+        self.epsilon = kwargs.get('epsilon', None)
+        self.k = kwargs.get('k', None)
+        self.nut = kwargs.get('nut', None)
+        self.p = kwargs.get('p', None)
+        self.p_rgh = kwargs.get('p_rgh', None)
+        self.t = kwargs.get('t', None)
+        self.u = kwargs.get('u', None)
+
     def add_face(self, face):
         self._faces.add(face)
 
@@ -568,7 +617,7 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         if isinstance(self.id, uuid.UUID):
             return 'a' + str(self.id.hex)
         else:
-            return str(self.id)
+            return 'a' + str(self.id)
 
     @property
     def faces(self):
@@ -587,7 +636,7 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
 
         faces_entry = "\n".join(['\t\t\t(' + ' '.join([str(y.id) for y in x.vertices]) + ')' for x in self.faces])
 
-        return (f"\t{self.name}\n"
+        return (f"\t{self.txt_id + '_' + self.name}\n"
                 f"\t{'{'}\n"
                 f"\t\ttype {self.type};\n"
                 f"\t\tfaces\n"
@@ -600,7 +649,9 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         return f'Boundary {self.id} (name={self.name}, type={self.type}, faces={self.faces})'
 
 
-inlet_patch = BlockMeshBoundary(name='inlet', type='patch')
+inlet_patch = BlockMeshBoundary(name='inlet',
+                                type='patch')
+
 outlet_patch = BlockMeshBoundary(name='outlet', type='patch')
 wall_patch = BlockMeshBoundary(name='wall', type='wall')
 pipe_wall_patch = BlockMeshBoundary(name='pipe_wall', type='interface')
@@ -1551,6 +1602,102 @@ class Block(object, metaclass=BlockMetaMock):
         return parallel_edges_sets
 
 
+class CellZone(object, metaclass=CellZoneMetaMock):
+    id_iter = itertools.count()
+
+    def __init__(self, *args, **kwargs):
+        self._name = None
+        self.name = kwargs.get('name', None)
+        self.id = next(CellZone.id_iter)
+        self.material = kwargs.get('material', None)
+
+        self.alphat_bc = kwargs.get('alphat_bc', [])
+        self.epsilon_bc = kwargs.get('epsilon_bc', [])
+        self.k_bc = kwargs.get('k_bc', [])
+        self.nut_bc = kwargs.get('nut_bc', [])
+        self.p_bc = kwargs.get('p_bc', [])
+        self.p_rgh = kwargs.get('p_bc', [])
+        self.t_rgh = kwargs.get('t_bc', [])
+        self.u_rgh = kwargs.get('u_bc', [])
+
+    @property
+    def name(self):
+        if self._name is None:
+            if self.material is not None:
+                self._name = 'Cell Zone ' + self.material.name
+        return self._name
+
+    @name.setter
+    def name(self, value):
+        self._name = value
+
+    @property
+    def txt_id(self):
+        if isinstance(self.id, uuid.UUID):
+            return 'a' + str(self.id.hex)
+        else:
+            return 'a' + str(self.id)
+
+    def init_directories(self, case_dir):
+        os.makedirs(os.path.join(case_dir, 'constant', str(self.txt_id)), exist_ok=True)
+        os.makedirs(os.path.join(case_dir, 'system', str(self.txt_id)), exist_ok=True)
+        os.makedirs(os.path.join(case_dir, '0', str(self.txt_id)), exist_ok=True)
+
+    def write_decompose_par_dict(self, case_dir):
+        os.makedirs(os.path.join(case_dir, 'system', str(self.txt_id)), exist_ok=True)
+        full_filename = os.path.join(case_dir, 'system', str(self.txt_id), 'decomposeParDict')
+        with open(full_filename, "w") as f:
+            f.write(self.material.decompose_par_dict)
+
+    def write_fvschemes(self, case_dir):
+        os.makedirs(os.path.join(case_dir, 'system', str(self.txt_id)), exist_ok=True)
+        full_filename = os.path.join(case_dir, 'system', str(self.txt_id), 'fvSchemes')
+        with open(full_filename, "w") as f:
+            f.write(self.material.fvschemes)
+
+    def write_fvsolution(self, case_dir):
+        os.makedirs(os.path.join(case_dir, 'system', str(self.txt_id)), exist_ok=True)
+        full_filename = os.path.join(case_dir, 'system', str(self.txt_id), 'fvSolution')
+        with open(full_filename, "w") as f:
+            f.write(self.material.fvsolution)
+
+    def write_thermo_physical_properties(self, case_dir):
+        #
+        os.makedirs(os.path.join(case_dir, 'constant', str(self.txt_id)), exist_ok=True)
+        full_filename = os.path.join(case_dir, 'constant', str(self.txt_id), 'thermophysicalProperties')
+        with open(full_filename, "w") as f:
+            f.write(self.material.thermo_physical_properties_entry)
+
+    def write_g(self, case_dir):
+        full_filename = os.path.join(case_dir, 'constant', str(self.txt_id), 'g')
+        with open(full_filename, "w") as f:
+            f.write(self.material.g_entry)
+
+    def write_thermo_physic_transport(self, case_dir):
+        # https://cpp.openfoam.org/v8/classFoam_1_1turbulenceThermophysicalTransportModels_1_1eddyDiffusivity.html#a10501494309552f678d858cb7de6c1d3
+        full_filename = os.path.join(case_dir, 'constant', str(self.txt_id), 'thermophysicalTransport')
+        with open(full_filename, "w") as f:
+            f.write(self.material.thermo_physic_transport_entry)
+
+    def write_momentum_transport(self, case_dir):
+        # https://cpp.openfoam.org/v8/classFoam_1_1turbulenceThermophysicalTransportModels_1_1eddyDiffusivity.html#a10501494309552f678d858cb7de6c1d3
+        full_filename = os.path.join(case_dir, 'constant', str(self.txt_id), 'momentumTransport')
+        with open(full_filename, "w") as f:
+            f.write(self.material.momentum_transport_entry)
+
+    def write_to_of(self, case_dir):
+        self.init_directories(case_dir)
+        self.write_thermo_physical_properties(case_dir)
+        self.write_decompose_par_dict(case_dir)
+        self.write_fvschemes(case_dir)
+        self.write_fvsolution(case_dir)
+
+        if isinstance(self.material, Fluid):
+            self.write_thermo_physic_transport(case_dir)
+            self.write_momentum_transport(case_dir)
+            self.write_g(case_dir)
+
+
 class CompBlock(object, metaclass=CompBlockMetaMock):
 
     @classmethod
@@ -1707,7 +1854,7 @@ class BlockMesh(object):
     @property
     def fvschemes(self):
         if self._fvschemes is None:
-            self._fvschemes = pkg_resources.read_text(msh_resources, 'fvSchemes')
+            self._fvschemes = pkg_resources.read_text(case_resources, 'fvSchemes')
         return self._fvschemes
 
     @fvschemes.setter
@@ -1719,7 +1866,7 @@ class BlockMesh(object):
     @property
     def fvsolution(self):
         if self._fvsolution is None:
-            self._fvsolution = pkg_resources.read_text(msh_resources, 'fvSolution')
+            self._fvsolution = pkg_resources.read_text(case_resources, 'fvSolution')
         return self._fvsolution
 
     @fvsolution.setter

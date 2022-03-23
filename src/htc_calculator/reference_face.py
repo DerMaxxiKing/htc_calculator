@@ -349,18 +349,18 @@ class ReferenceFace(object):
         dst = os.path.join(case_dir, 'system', 'controlDict')
         copyfile(source, dst)
 
-        # write fvSchemes:
+        # write solid_fvSchemes:
         path = 'fvSchemes'
         with pkg_resources.path(msh_resources, path) as path:
             source = path.__str__()
         dst = os.path.join(case_dir, 'system', 'fvSchemes')
         copyfile(source, dst)
 
-        # write fvSolution:
-        path = 'fvSolution'
+        # write solid_fvSolution:
+        path = 'solid_fvSolution'
         with pkg_resources.path(msh_resources, path) as path:
             source = path.__str__()
-        dst = os.path.join(case_dir, 'system', 'fvSolution')
+        dst = os.path.join(case_dir, 'system', 'solid_fvSolution')
         copyfile(source, dst)
 
         # write createBafflesDict
