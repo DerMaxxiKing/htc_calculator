@@ -1,9 +1,11 @@
 from copy import deepcopy
 from .base import BoundaryCondition
+from .base import BCFile
+from inspect import cleandoc
 
 default_value = 0.00463812
 
-field_template = """
+field_template = cleandoc("""
 /*--------------------------------*- C++ -*----------------------------------*\
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
@@ -36,7 +38,7 @@ epsilon=Cmu**0.75*k**1.5/L
 
 dimensions      [ 0 2 -2 0 0 0 0 ];
 
-internalField   uniform <internal_field_value>;
+internalField   <internal_field_value>;
 
 boundaryField
 {
@@ -46,18 +48,31 @@ boundaryField
 }
 
 // ************************************************************************* //
-"""
+""")
+
+
+class K(BCFile):
+    default_value = default_value
+    field_template = field_template
+    type = 'k'
+    default_entry = cleandoc("""
+                                                    ".*"
+                                                    {
+                                                        type            kqRWallFunction;
+                                                        value           $internalField;
+                                                    }
+                                                    """)
 
 
 class TurbulentIntensityKineticEnergyInlet(BoundaryCondition):
 
-    template = """
+    template = cleandoc("""
     {
         type            turbulentIntensityKineticEnergyInlet;
         intensity       <intensity>;
-        value           uniform <value>;
+        value           <value>;
     }
-    """
+    """)
 
     def __init__(self, *args, **kwargs):
         BoundaryCondition.__init__(self, *args, **kwargs)
@@ -74,12 +89,12 @@ class TurbulentIntensityKineticEnergyInlet(BoundaryCondition):
 
 class KqRWallFunction(BoundaryCondition):
 
-    template = """
+    template = cleandoc("""
     {
         type            kqRWallFunction;
-        value           uniform <value>;
+        value           <value>;
     }
-    """
+    """)
 
     def __init__(self, *args, **kwargs):
         BoundaryCondition.__init__(self, *args, **kwargs)

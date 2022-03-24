@@ -1,9 +1,11 @@
 from copy import deepcopy
 from .base import BoundaryCondition
+from .base import BCFile
+from inspect import cleandoc
 
 default_value = 0
 
-field_template = """
+field_template = cleandoc("""
 /*--------------------------------*- C++ -*----------------------------------*\
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
@@ -22,7 +24,7 @@ FoamFile
 
 dimensions      [0 2 -1 0 0 0 0];
 
-internalField   uniform <internal_field_value>;
+internalField   <internal_field_value>;
 
 boundaryField
 {
@@ -33,17 +35,30 @@ boundaryField
 
 
 // ************************************************************************* //
-"""
+""")
+
+
+class Nut(BCFile):
+    default_value = default_value
+    field_template = field_template
+    type = 'nut'
+    default_entry = cleandoc("""
+                                                    ".*"
+                                                    {
+                                                        type            nutkWallFunction;
+                                                        value           $internalField;
+                                                    }
+                                                    """)
 
 
 class NutkWallFunction(BoundaryCondition):
 
-    template = """
+    template = cleandoc("""
     {
         type            nutkWallFunction;
-        value           uniform <value>;
+        value           <value>;
     }
-    """
+    """)
 
     def __init__(self, *args, **kwargs):
         """
@@ -65,14 +80,14 @@ class NutkWallFunction(BoundaryCondition):
 
 class NutkRoughWallFunction(BoundaryCondition):
 
-    template = """
+    template = cleandoc("""
     {
         type            nutkRoughWallFunction;
-        Ks              uniform <ks>;
-        Cs              uniform <cs>;
-        value           uniform <value>;
+        Ks              <ks>;
+        Cs              <cs>;
+        value           <value>;
     }
-    """
+    """)
 
     def __init__(self, *args, **kwargs):
         """

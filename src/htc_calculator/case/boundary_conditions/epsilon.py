@@ -1,9 +1,12 @@
+import os
 from copy import deepcopy
 from .base import BoundaryCondition
+from .base import BCFile
+from inspect import cleandoc
 
 default_value = 0.0064879
 
-field_template = """
+field_template = cleandoc("""
 /*--------------------------------*- C++ -*----------------------------------*\
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
@@ -22,7 +25,7 @@ FoamFile
 
 dimensions      [ 0 2 -3 0 0 0 0 ];
 
-internalField   uniform <internal_field_value>;
+internalField   <internal_field_value>;
 
 boundaryField
 {
@@ -32,17 +35,30 @@ boundaryField
 }
 
 // ************************************************************************* //
-"""
+""")
+
+
+class Epsilon(BCFile):
+    default_value = default_value
+    field_template = field_template
+    type = 'epsilon'
+    default_entry = cleandoc("""
+                                                   ".*"
+                                                   {
+                                                       type            epsilonWallFunction;
+                                                       value           $internalField;
+                                                   }
+                                               """)
 
 
 class EpsilonWallFunction(BoundaryCondition):
 
-    template = """
+    template = cleandoc("""
     {
         type            epsilonWallFunction;
-        value           uniform <value>;
+        value           <value>;
     }
-    """
+    """)
 
     def __init__(self, *args, **kwargs):
         BoundaryCondition.__init__(self, *args, **kwargs)
@@ -56,13 +72,13 @@ class EpsilonWallFunction(BoundaryCondition):
 
 
 class TurbulentMixingLengthDissipationRateInlet(BoundaryCondition):
-    template = """
+    template = cleandoc("""
     {
         type            turbulentMixingLengthDissipationRateInlet;
         mixingLength    <mixing_length>;
-        value           uniform <value>;
+        value           <value>;
     }
-        """
+    """)
 
     def __init__(self, *args, **kwargs):
         """

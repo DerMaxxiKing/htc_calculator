@@ -1,9 +1,11 @@
 from copy import deepcopy
 from .base import BoundaryCondition
+from .base import BCFile
+from inspect import cleandoc
 
 default_value = 0
 
-field_template = """
+field_template = cleandoc("""
 /*--------------------------------*- C++ -*----------------------------------*\
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
@@ -22,7 +24,7 @@ FoamFile
 
 dimensions      [ 1 -1 -2 0 0 0 0 ];
 
-internalField   uniform <value>;
+internalField   <value>;
 
 boundaryField
 {
@@ -32,4 +34,17 @@ boundaryField
 }
 
 // ************************************************************************* //
-"""
+""")
+
+
+class P(BCFile):
+    default_value = default_value
+    field_template = field_template
+    type = 'p'
+    default_entry = cleandoc("""
+                                                    ".*"
+                                                    {
+                                                        type            calculated;
+                                                        value           $internalField;
+                                                    }
+                                                    """)

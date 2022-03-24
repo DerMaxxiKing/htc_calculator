@@ -2,7 +2,8 @@ import numpy as np
 import copy
 
 from ..logger import logger
-from .block_mesh import BlockMeshVertex, BlockMeshEdge, Block, unit_vector, create_edges_between_layers, pipe_wall_patch, inlet_patch, outlet_patch, wall_patch
+from .block_mesh import BlockMeshVertex, BlockMeshEdge, Block, unit_vector, create_edges_between_layers, \
+    pipe_wall_patch, inlet_patch, outlet_patch, wall_patch, fluid_wall_patch
 from ..geo_tools import get_position
 from ..tools import vector_to_np_array, perpendicular_vector, export_objects
 
@@ -138,7 +139,7 @@ class PipeSection(object):
             blocks.append(new_block)
 
         if not outer_pipe:
-            _ = [[setattr(blocks[xx[0]].faces[yy], 'boundary', wall_patch)
+            _ = [[setattr(blocks[xx[0]].faces[yy], 'boundary', fluid_wall_patch)
                   for yy in xx[1]] for xx in self.pipe_wall_def]
 
         if inlet:

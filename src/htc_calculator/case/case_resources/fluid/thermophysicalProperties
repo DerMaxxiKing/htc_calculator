@@ -39,13 +39,13 @@ mixture
     }
     thermodynamics
     {
-        Cp              <Cp>;
+        Cp              <cp>;
         Hf              0;          // heat of fusion
     }
     transport
     {
         mu              <mu>;       // Dynamic viscosity of mixture [kg/m/s]
-        Pr              <Pr>;       // Prandtl-Zahl
+        Pr              <pr>;       // Prandtl-Zahl
     }
 }
 

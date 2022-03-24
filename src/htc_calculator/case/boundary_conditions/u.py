@@ -1,10 +1,12 @@
 import numpy as np
 from copy import deepcopy
 from .base import BoundaryCondition
+from .base import BCFile
+from inspect import cleandoc
 
 default_value = np.array([0, 0, 0])
 
-field_template = """
+field_template = cleandoc("""
 /*--------------------------------*- C++ -*----------------------------------*\
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
@@ -23,7 +25,7 @@ FoamFile
 
 dimensions      [ 0 1 -1 0 0 0 0 ];
 
-internalField   uniform <value>;
+internalField   <value>;
 
 boundaryField
 {
@@ -33,19 +35,51 @@ boundaryField
 }
 
 // ************************************************************************* //
-"""
+""")
+
+
+class U(BCFile):
+    default_value = default_value
+    field_template = field_template
+    type = 'U'
+    default_entry = cleandoc("""
+                                                    ".*"
+                                                    {
+                                                        type            noSlip;
+                                                    }
+                                                    """)
+
+
+class PressureInletOutletVelocity(BoundaryCondition):
+
+    template = cleandoc("""
+    {
+        type            pressureInletOutletVelocity;
+        value           <value>;
+    }
+    """)
+
+    def __init__(self, *args, **kwargs):
+        BoundaryCondition.__init__(self, *args, **kwargs)
+        self.value = kwargs.get('value', '$internalField')    # volume flow rate in m³/s
+        self.object = 'U'
+
+    def generate_dict_entry(self, *args, **kwargs):
+        template = deepcopy(self.template)
+        template = template.replace('<value>', str(self.value))
+        return template
 
 
 class VolumeFlowRate(BoundaryCondition):
 
-    template = """
+    template = cleandoc("""
     {
         type flowRateInletVelocity;
         volumetricFlowRate <flow_rate>;
         extrapolateProfile yes;
         value uniform (0 0 0);
     }
-    """
+    """)
 
     def __init__(self, *args, **kwargs):
         BoundaryCondition.__init__(self, *args, **kwargs)
@@ -60,11 +94,11 @@ class VolumeFlowRate(BoundaryCondition):
 
 class NoSlip(BoundaryCondition):
 
-    template = """
+    template = cleandoc("""
     {
         type            noSlip;
     }
-    """
+    """)
 
     def __init__(self, *args, **kwargs):
         """

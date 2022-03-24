@@ -1,14 +1,11 @@
 import numpy as np
-from src.htc_calculator.reference_face import ReferenceFace
 from src.htc_calculator.activated_reference_face import ActivatedReferenceFace
 from src.htc_calculator.construction import Solid, Layer, ComponentConstruction
 from src.htc_calculator.buildin_materials import water, aluminium
-from src.htc_calculator.meshing.mesh_setup import MeshSetup
 from src.htc_calculator.meshing.buildin_pipe_sections.tube_with_wall_optimized import pipe_section
 
-# import sys
-# print(sys.path)
-# sys.path.insert(0, '/tmp/squashfs-root/usr/lib/python3.9/site-packages')
+from src.htc_calculator import OFCase, TabsBC
+
 
 pipe_section.materials = [water, aluminium]
 
@@ -85,6 +82,23 @@ tabs1 = ActivatedReferenceFace(vertices=vertices,
                                bending_radius=100,
                                tube_side_1_offset=100,
                                name='test1')
+
+my_bc = TabsBC(inlet_volume_flow=4.1666e-5,
+               inlet_temperature=323.15,
+               top_ambient_temperature=293.15,
+               bottom_ambient_temperature=293.15,
+               top_htc=10,
+               bottom_htc=5.8884,
+               initial_temperature=293.15,
+               initial_temperatures={water: 293.16,
+                                     aluminium: 293.16,
+                                     concrete: 293.16,
+                                     rockwool: 293.16})
+
+case = OFCase(reference_face=tabs1,
+              bc=my_bc)
+case.run()
+
 #
 # tabs1.generate_reference_geometry()
 # tabs1.export_stl('/tmp/test_stls')
@@ -96,7 +110,7 @@ tabs1 = ActivatedReferenceFace(vertices=vertices,
 # tabs1.generate_block_mesh_dict()
 # tabs1.generate_shm_mesh()
 
-tabs1.run_case()
+# tabs1.run_case()
 
 # tabs1.generate_mesh()
 

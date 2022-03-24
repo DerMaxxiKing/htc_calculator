@@ -8,6 +8,8 @@ from ..logger import logger
 from ..tools import vector_to_np_array, perpendicular_vector, export_objects, angle_between_vectors, array_row_intersection
 from ..geo_tools import search_contacts, surfaces_in_contact, get_position
 from ..construction import Solid, Fluid
+from ..case.boundary_conditions import *
+from ..case.boundary_conditions.user_bcs import *
 # import trimesh
 
 import FreeCAD
@@ -26,12 +28,7 @@ except ImportError:
 
 from . import meshing_resources as msh_resources
 
-from ..config import n_proc
 from ..case import case_resources
-from ..case.case_resources import solid as solid_resources
-from ..case.case_resources import fluid as fluid_resources
-from ..case.case_resources.solid import static as static_solid_resources
-from ..case.case_resources.fluid import static as static_fluid_resources
 
 App = FreeCAD
 
@@ -391,11 +388,11 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
     @property
     def num_cells(self):
         if self._num_cells is None:
-            if self.length is not None:
+            if (self.length is not None) and (self.length != 0):
                 if isinstance(self.fc_edge.Curve, FCPart.Line):
                     self._num_cells = int(np.ceil(self.length / self.cell_size))
                 if isinstance(self.fc_edge.Curve, FCPart.Arc):
-                    self._num_cells = int(np.ceil(self.length / self.cell_size))
+                    self._num_cells = int(np.ceil(self.length / self.cell_size)) * 2
         return self._num_cells
 
     @num_cells.setter
@@ -589,22 +586,24 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
 
     def __init__(self, *args, **kwargs):
 
+        self._txt_id = None
+
         self.id = next(BlockMeshBoundary.id_iter)
         self.name = kwargs.get('name')
         self.type = kwargs.get('type')
         self._faces = kwargs.get('faces', set())
 
+        self.txt_id = kwargs.get('txt_id', None)
+
         self.n_faces = kwargs.get('n_faces', None)
         self.start_face = kwargs.get('start_face', None)
 
-        self.alphat = kwargs.get('alphat', None)
-        self.epsilon = kwargs.get('epsilon', None)
-        self.k = kwargs.get('k', None)
-        self.nut = kwargs.get('nut', None)
-        self.p = kwargs.get('p', None)
-        self.p_rgh = kwargs.get('p_rgh', None)
-        self.t = kwargs.get('t', None)
-        self.u = kwargs.get('u', None)
+        self.user_bc = kwargs.get('user_bc', None)
+        self.solid_user_bc = kwargs.get('solid_user_bc', None)
+        self.fluid_user_bc = kwargs.get('fluid_user_bc', None)
+
+        self.case = kwargs.get('case', None)
+        self.cell_zone = kwargs.get('cell_zone', None)
 
     def add_face(self, face):
         self._faces.add(face)
@@ -614,10 +613,16 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
 
     @property
     def txt_id(self):
-        if isinstance(self.id, uuid.UUID):
-            return 'a' + str(self.id.hex)
-        else:
-            return 'a' + str(self.id)
+        if self._txt_id is None:
+            if isinstance(self.id, uuid.UUID):
+                self._txt_id = 'bc' + str(self.id.hex)
+            else:
+                self._txt_id = 'bc' + str(self.id)
+        return self._txt_id
+
+    @txt_id.setter
+    def txt_id(self, value):
+        self._txt_id = value
 
     @property
     def faces(self):
@@ -649,14 +654,16 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         return f'Boundary {self.id} (name={self.name}, type={self.type}, faces={self.faces})'
 
 
-inlet_patch = BlockMeshBoundary(name='inlet',
-                                type='patch')
-
-outlet_patch = BlockMeshBoundary(name='outlet', type='patch')
-wall_patch = BlockMeshBoundary(name='wall', type='wall')
-pipe_wall_patch = BlockMeshBoundary(name='pipe_wall', type='interface')
-top_side_patch = BlockMeshBoundary(name='top_side', type='patch')
-bottom_side_patch = BlockMeshBoundary(name='bottom_side', type='patch')
+inlet_patch = BlockMeshBoundary(name='inlet', type='patch', user_bc=VolumeFlowInlet())
+outlet_patch = BlockMeshBoundary(name='outlet', type='patch', user_bc=Outlet())
+wall_patch = BlockMeshBoundary(name='wall', type='wall', user_bc=SolidWall())
+fluid_wall_patch = BlockMeshBoundary(name='fluid_wall', type='wall', user_bc=FluidWall())
+pipe_wall_patch = BlockMeshBoundary(name='pipe_wall',
+                                    type='interface',
+                                    solid_user_bc=SolidFluidInterface(),
+                                    fluid_user_bc=FluidSolidInterface())
+top_side_patch = BlockMeshBoundary(name='top_side', type='patch', user_bc=SolidConvection())
+bottom_side_patch = BlockMeshBoundary(name='bottom_side', type='patch', user_bc=SolidConvection())
 
 NoPlane = object()
 NoNormal = object()
@@ -1610,15 +1617,17 @@ class CellZone(object, metaclass=CellZoneMetaMock):
         self.name = kwargs.get('name', None)
         self.id = next(CellZone.id_iter)
         self.material = kwargs.get('material', None)
+        self.boundaries = kwargs.get('boundaries', [])
+        self.case = kwargs.get('case', None)
 
-        self.alphat_bc = kwargs.get('alphat_bc', [])
-        self.epsilon_bc = kwargs.get('epsilon_bc', [])
-        self.k_bc = kwargs.get('k_bc', [])
-        self.nut_bc = kwargs.get('nut_bc', [])
-        self.p_bc = kwargs.get('p_bc', [])
-        self.p_rgh = kwargs.get('p_bc', [])
-        self.t_rgh = kwargs.get('t_bc', [])
-        self.u_rgh = kwargs.get('u_bc', [])
+        self.alphat = kwargs.get('alphat', Alphat())
+        self.epsilon = kwargs.get('epsilon', Epsilon())
+        self.k = kwargs.get('k', K())
+        self.nut = kwargs.get('nut', Nut())
+        self.p = kwargs.get('p', P())
+        self.p_rgh = kwargs.get('p_rgh', PRgh())
+        self.t = kwargs.get('t', T())
+        self.u = kwargs.get('u', U())
 
     @property
     def name(self):
@@ -1696,6 +1705,42 @@ class CellZone(object, metaclass=CellZoneMetaMock):
             self.write_thermo_physic_transport(case_dir)
             self.write_momentum_transport(case_dir)
             self.write_g(case_dir)
+
+    def update_bcs(self):
+
+        for boundary in self.boundaries:
+            logger.debug(f'updating_bcs')
+
+            if boundary.type == 'interface':
+                bc_key = boundary.txt_id
+            else:
+                bc_key = boundary.txt_id + '_' + boundary.name
+
+            self.t.patches[bc_key] = boundary.user_bc.t
+
+            if isinstance(self.material, Fluid):
+                self.alphat.patches[bc_key] = boundary.user_bc.alphat
+                self.epsilon.patches[bc_key] = boundary.user_bc.epsilon
+                self.k.patches[bc_key] = boundary.user_bc.k
+                self.nut.patches[bc_key] = boundary.user_bc.nut
+                self.p.patches[bc_key] = boundary.user_bc.p
+                self.p_rgh.patches[bc_key] = boundary.user_bc.p_rgh
+                self.u.patches[bc_key] = boundary.user_bc.u
+
+        logger.debug(f'updating_bcs')
+
+    def write_bcs(self, case_dir=None):
+
+        if case_dir is None:
+            case_dir = self.case.case_dir
+
+        # write T:
+        self.t.internal_field_value = self.case.bc.initial_temperature[self.material]
+        self.t.write(os.path.join(case_dir, '0', self.txt_id))
+
+        for bc_name in ['alphat', 'epsilon', 'k', 'nut', 'p', 'p_rgh', 'u']:
+            bc_file = getattr(self, bc_name)
+            bc_file.write(os.path.join(case_dir, '0', self.txt_id))
 
 
 class CompBlock(object, metaclass=CompBlockMetaMock):
@@ -1965,6 +2010,44 @@ class BlockMesh(object):
     def write_block_mesh_dict(self):
         with open(os.path.join(self.case_dir, 'system', "blockMeshDict"), "w") as f:
             f.write(self.block_mesh_dict)
+
+    def fix_inconsistent_block_faces(self, block_ids):
+        logger.info(f'Fixing inconsistent block faces for Blocks {block_ids}')
+        blocks = [Block.instances[x] for x in block_ids]
+
+        edges_set = []
+        for edge in blocks[1].block_edges:
+            b1_p_edges_set = None
+            b2_p_edges_set = None
+            num_cells1 = None
+            num_cells2 = None
+
+            if edge in blocks[0].block_edges:
+                print(f'{edge} in {blocks[0]}')
+                edge_index = np.where(blocks[0].block_edges == edge)
+                ape_index = np.where(np.any(Block.all_parallel_edges == edge_index, axis=1))[0][0]
+                num_cells1 = blocks[0].num_cells[ape_index]
+                if edge_index:
+                    b1_p_edges_set = blocks[0].parallel_edges_sets[
+                        np.where(np.any(Block.all_parallel_edges == edge_index, axis=1))[0][0]]
+
+                edge_index2 = np.where(blocks[1].block_edges == edge)
+                ape_index2 = np.where(np.any(Block.all_parallel_edges == edge_index2, axis=1))[0][0]
+                num_cells2 = blocks[1].num_cells[ape_index2]
+                if edge_index2:
+                    b2_p_edges_set = blocks[1].parallel_edges_sets[
+                        np.where(np.any(Block.all_parallel_edges == edge_index2, axis=1))[0][0]]
+
+                if num_cells1 != num_cells2:
+                    logger.error(f'  ')
+            edges_set.append([(b1_p_edges_set, b2_p_edges_set), (num_cells1, num_cells2)])
+
+            # if not b1_p_edges_set is b2_p_edges_set:
+            #     edges_set.append([b1_p_edges_set, b2_p_edges_set])
+        bmd_filename = os.path.join(self.case_dir, 'system', 'blockMeshDict')
+        os.remove(bmd_filename) if os.path.exists(bmd_filename) else None
+
+        self.write_block_mesh_dict()
 
 
 # def get_position(vertex: FCPart.Vertex):

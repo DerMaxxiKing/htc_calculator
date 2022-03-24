@@ -326,18 +326,18 @@ class ComponentConstruction(object):
             return str(self.id)
 
 
-def write_region_properties(materials, case_dir):
+def write_region_properties(cell_zones, case_dir):
     os.makedirs(os.path.join(case_dir, 'constant'), exist_ok=True)
     entry = pkg_resources.read_text(case_resources, 'regionProperties')
 
     solids = []
     fluids = []
 
-    for mat in materials:
-        if isinstance(mat, Solid):
-            solids.append(mat.txt_id)
-        elif isinstance(mat, Fluid):
-            fluids.append(mat.txt_id)
+    for cell_zone in cell_zones:
+        if isinstance(cell_zone.material, Solid):
+            solids.append(cell_zone.txt_id)
+        elif isinstance(cell_zone.material, Fluid):
+            fluids.append(cell_zone.txt_id)
 
     entry = entry.replace('<solids>', ' '.join(solids))
     entry = entry.replace('<fluids>', ' '.join(fluids))

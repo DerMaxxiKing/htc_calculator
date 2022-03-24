@@ -1,6 +1,7 @@
 import os
 from copy import deepcopy
 from inspect import cleandoc
+from .base import BCFile
 
 default_value = 0
 
@@ -23,7 +24,7 @@ FoamFile
 
 dimensions      [1 -1 -1 0 0 0 0];
 
-internalField   uniform <internal_field_value>;
+internalField   <internal_field_value>;
 
 boundaryField
 {
@@ -36,33 +37,15 @@ boundaryField
 """)
 
 
-class Alphat(object):
+class Alphat(BCFile):
 
-    def __init__(self, *args, **kwargs):
-
-        self.internal_field_value = kwargs.get('internal_field_value', default_value)
-        self.patches = kwargs.get('patches', None)
-
-        self._content = None
-
-    @property
-    def content(self):
-        if self._content is None:
-            template = deepcopy(field_template)
-            template = template.replace('<internal_field_value>', str(self.internal_field_value))
-
-            if self.patches is None:
-                template = template.replace('<patches>',
-                                            cleandoc("""
-                                                ".*"
-                                                {
-                                                    type            calculated;
-                                                    value           $internalField;
-                                                }
-                                            """))
-            self._content = template
-        return self._content
-
-    def write(self, directory):
-        with open(os.path.join(directory, "alphat"), "w") as f:
-            f.write(self.content)
+    default_value = default_value
+    field_template = field_template
+    type = 'alphat'
+    default_entry = cleandoc("""
+                                                   ".*"
+                                                   {
+                                                       type            calculated;
+                                                       value           $internalField;
+                                                   }
+                                               """)

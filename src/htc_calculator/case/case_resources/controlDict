@@ -48,9 +48,6 @@ adjustTimeStep  off;
 
 functions
 {
-    #includeFunc residuals(region = shell, p_rgh, U, h)
-    #includeFunc residuals(region = tube, p_rgh, U, h)
-    #includeFunc residuals(region = solid, h)
 }
 
 // ************************************************************************* //

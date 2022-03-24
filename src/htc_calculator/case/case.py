@@ -3,11 +3,14 @@ import uuid
 import os
 import stat
 import subprocess
+from re import findall, MULTILINE
 
 from ..logger import logger
 from ..meshing.block_mesh import BlockMesh, inlet_patch, outlet_patch, wall_patch, pipe_wall_patch, top_side_patch, \
     bottom_side_patch, CellZone, BlockMeshBoundary
-from ..construction import write_region_properties
+from ..construction import write_region_properties, Fluid, Solid
+from .boundary_conditions.user_bcs import SolidFluidInterface, FluidSolidInterface
+from .. import config
 
 from PyFoam.Applications.Decomposer import Decomposer
 from .of_parser import CppDictParser
@@ -21,6 +24,27 @@ except ImportError:
 from . import case_resources
 
 
+class TabsBC(object):
+
+    def __init__(self, *args, **kwargs):
+
+        self.inlet_volume_flow = kwargs.get('inlet_volume_flow', 4.1666e-5)     # volume flow rate in m³/s
+        self.inlet_temperature = kwargs.get('inlet_temperature', 323.15)     # Inlet temperature in K
+
+        self.top_ambient_temperature = kwargs.get('top_ambient_temperature', 293.15)    # Ambient temperature in K at the top side
+        self.bottom_ambient_temperature = kwargs.get('bottom_ambient_temperature', 293.15)  # Ambient temperature in K at the top side
+
+        # heat transfer coefficient in [W/m^2/K] at the top side of the construction
+        self.top_htc = kwargs.get('top_htc',
+                                  10)
+        # heat transfer coefficient in [W/m^2/K] at the top side of the construction
+        self.bottom_htc = kwargs.get('bottom_htc',
+                                     5.8884)
+
+        self.initial_temperature = kwargs.get('initial_temperatures', 293.15)
+        self.cell_zone_initial_temperatures = kwargs.get('initial_temperatures', None)
+
+
 class OFCase(object):
 
     default_path = '/tmp/'
@@ -31,7 +55,8 @@ class OFCase(object):
         self.name = kwargs.get('name', 'unnamed case')
         self.reference_face = kwargs.get('reference_face')
 
-        self.n_proc = kwargs.get('n_proc', 8)
+        self._n_proc = None
+        self.n_proc = kwargs.get('n_proc', config.n_proc)
 
         self._case_dir = None
         self._block_mesh = None
@@ -47,6 +72,18 @@ class OFCase(object):
         self._all_run = None
 
         self.case_dir = kwargs.get('case_dir', None)
+        self.bc = kwargs.get('bc', None)
+
+    @property
+    def n_proc(self):
+        if self._n_proc is None:
+            self._n_proc = config.n_proc
+        return self._n_proc
+
+    @n_proc.setter
+    def n_proc(self, value):
+        self._n_proc = value
+        config.n_proc = value
 
     @property
     def block_mesh(self):
@@ -194,8 +231,8 @@ class OFCase(object):
         with open(os.path.join(self.case_dir, 'system', "decomposeParDict"), "w") as f:
             f.write(self.decompose_par_dict)
 
-    def run_block_mesh(self):
-        logger.info(f'Creating block mesh....')
+    def run_block_mesh(self, retry=False):
+        logger.info(f'Generating mesh....')
         time.sleep(0.5)
         res = subprocess.run(["/bin/bash", "-i", "-c", "blockMesh 2>&1 | tee blockMesh.log"],
                              capture_output=True,
@@ -203,11 +240,22 @@ class OFCase(object):
                              user='root')
         if res.returncode == 0:
             output = res.stdout.decode('ascii')
+            if output.find('FOAM FATAL ERROR') != -1:
+                logger.error(f'Error Creating block mesh:\n\n{output}')
+                if retry:
+                    if output.find('Inconsistent number of faces') != -1:
+                        items = findall("Inconsistent number of faces.*$", output, MULTILINE)
+                        inconsistent_blocks = [int(x) for x in findall(r'\d+', items[0])]
+                        self.block_mesh.fix_inconsistent_block_faces(inconsistent_blocks)
+                        self.run_block_mesh(retry=False)
+                else:
+                    raise Exception(f'Error Creating block mesh:\n\n{output}')
             logger.info(f"Successfully created block mesh: \n\n {output[output.find('Mesh Information'):]}")
         else:
             logger.error(f"{res.stderr.decode('ascii')}")
             raise Exception(f"Error creating block Mesh:\n{res.stderr.decode('ascii')}")
 
+        time.sleep(0.5)
         return True
 
     def run_split_mesh_regions(self):
@@ -223,6 +271,24 @@ class OFCase(object):
                 logger.error(f'Error splitting Mesh Regions:\n\n{output}')
                 raise Exception(f'Error splitting Mesh Regions:\n\n{output}')
             logger.info(f"Successfully splitted Mesh Regions \n\n{output}")
+        else:
+            logger.error(f"{res.stderr.decode('ascii')}")
+
+        return True
+
+    def run_decompose_par(self):
+        logger.info(f'Running decompose par....')
+        res = subprocess.run(
+            ["/bin/bash", "-i", "-c", "decomposePar -allRegions 2>&1 | tee decomposePar.log"],
+            capture_output=True,
+            cwd=self.case_dir,
+            user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            if output.find('FOAM FATAL ERROR') != -1:
+                logger.error(f'Error decomposePar:\n\n{output}')
+                raise Exception(f'Error decomposePar:\n\n{output}')
+            logger.info(f"Successfully ran decomposePar \n\n{output}")
         else:
             logger.error(f"{res.stderr.decode('ascii')}")
 
@@ -251,10 +317,11 @@ class OFCase(object):
         # write region properties:
         write_region_properties(comp_blocks.cell_zones, self.case_dir)
 
-        self.run_block_mesh()
+        self.run_block_mesh(retry=True)
         self.run_split_mesh_regions()
 
         for cell_zone in comp_blocks.cell_zones:
+            cell_zone.case = self
             of_dict = CppDictParser.from_file(os.path.join(self.case_dir, 'constant',
                                                            cell_zone.txt_id, 'polyMesh', 'boundary'))
             boundary_dict = {k: v for k, v in of_dict.values.items() if (v and (k != 'FoamFile'))}
@@ -265,17 +332,35 @@ class OFCase(object):
                 if boundary is None:
                     if '_to_' in key:
                         # create interface
-                        boundaries.append(BlockMeshBoundary(name=key,
-                                                            type='interface',
-                                                            n_faces=value['nFaces'],
-                                                            start_face=value['startFace']))
+                        if isinstance(cell_zone.material, Solid):
+                            user_bc = SolidFluidInterface()
+                        elif isinstance(cell_zone.material, Fluid):
+                            user_bc = FluidSolidInterface()
+                        else:
+                            raise NotImplementedError
+
+                        boundary = BlockMeshBoundary(name=key,
+                                                     type='interface',
+                                                     n_faces=value['nFaces'],
+                                                     start_face=value['startFace'],
+                                                     case=self,
+                                                     txt_id=key,
+                                                     user_bc=user_bc,
+                                                     cell_zone=cell_zone)
+                    else:
+                        raise NotImplementedError()
                 else:
                     boundary.n_faces = value['nFaces']
                     boundary.startFace = value['startFace']
-                    boundaries.append(boundary)
+                    boundary.case = self
+                    boundary.cell_zone = cell_zone
+
+                boundaries.append(boundary)
 
             cell_zone.boundaries = boundaries
+            cell_zone.update_bcs()
+            cell_zone.write_bcs(self.case_dir)
 
-
+        self.run_decompose_par()
 
         logger.debug('bla bla')
