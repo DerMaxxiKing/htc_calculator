@@ -10,6 +10,7 @@ from ..geo_tools import search_contacts, surfaces_in_contact, get_position
 from ..construction import Solid, Fluid
 from ..case.boundary_conditions import *
 from ..case.boundary_conditions.user_bcs import *
+from ..case.function_objects import WallHeatFlux, PressureDifferencePatch, TemperatureDifferencePatch
 # import trimesh
 
 import FreeCAD
@@ -33,8 +34,8 @@ from ..case import case_resources
 App = FreeCAD
 
 
-default_cell_size = 100
-default_arc_cell_size = 25
+default_cell_size = 50
+default_arc_cell_size = 10
 
 
 def np_cache(function):
@@ -587,6 +588,7 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
     def __init__(self, *args, **kwargs):
 
         self._txt_id = None
+        self._function_objects = None
 
         self.id = next(BlockMeshBoundary.id_iter)
         self.name = kwargs.get('name')
@@ -603,13 +605,25 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         self.fluid_user_bc = kwargs.get('fluid_user_bc', None)
 
         self.case = kwargs.get('case', None)
-        self.cell_zone = kwargs.get('cell_zone', None)
+        self._cell_zone = kwargs.get('cell_zone', None)
+
+        self.function_objects = kwargs.get('function_objects', [])
 
     def add_face(self, face):
         self._faces.add(face)
 
     def add_faces(self, faces):
         self._faces.update(faces)
+
+    @property
+    def cell_zone(self):
+        return self._cell_zone
+
+    @cell_zone.setter
+    def cell_zone(self, value):
+        self._cell_zone = value
+        for fo in self._function_objects:
+            fo.cell_zone = self.cell_zone
 
     @property
     def txt_id(self):
@@ -650,20 +664,55 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
                 f"\t\t);\n"
                 f"\t{'}'}")
 
+    @property
+    def function_objects(self):
+        return self._function_objects
+
+    @function_objects.setter
+    def function_objects(self, value):
+        self._function_objects = value
+        for fo in self._function_objects:
+            fo.patches.add(self)
+            fo.cell_zone = self.cell_zone
+
     def __repr__(self):
         return f'Boundary {self.id} (name={self.name}, type={self.type}, faces={self.faces})'
 
 
+# Boundary conditions:
+# ---------------------------------------------------------------------------------------------------------------------
+
 inlet_patch = BlockMeshBoundary(name='inlet', type='patch', user_bc=VolumeFlowInlet())
+
 outlet_patch = BlockMeshBoundary(name='outlet', type='patch', user_bc=Outlet())
+
 wall_patch = BlockMeshBoundary(name='wall', type='wall', user_bc=SolidWall())
+
 fluid_wall_patch = BlockMeshBoundary(name='fluid_wall', type='wall', user_bc=FluidWall())
+
 pipe_wall_patch = BlockMeshBoundary(name='pipe_wall',
                                     type='interface',
                                     solid_user_bc=SolidFluidInterface(),
                                     fluid_user_bc=FluidSolidInterface())
-top_side_patch = BlockMeshBoundary(name='top_side', type='patch', user_bc=SolidConvection())
-bottom_side_patch = BlockMeshBoundary(name='bottom_side', type='patch', user_bc=SolidConvection())
+
+top_side_patch = BlockMeshBoundary(name='top_side',
+                                   type='wall',
+                                   user_bc=SolidConvection(),
+                                   function_objects=[WallHeatFlux()]
+                                   )
+
+bottom_side_patch = BlockMeshBoundary(name='bottom_side',
+                                      type='wall',
+                                      user_bc=SolidConvection(),
+                                      function_objects=[WallHeatFlux()]
+                                      )
+
+PressureDifferencePatch(patch1=inlet_patch,
+                        patch2=outlet_patch)
+
+TemperatureDifferencePatch(patch1=inlet_patch,
+                           patch2=outlet_patch)
+
 
 NoPlane = object()
 NoNormal = object()
@@ -1176,6 +1225,7 @@ class Block(object, metaclass=BlockMetaMock):
         self.cell_zone = kwargs.get('cell_zone', None)
         self.auto_cell_size = kwargs.get('auto_cell_size', True)
         self.cell_size = kwargs.get('cell_size', 100)
+        self.grading = kwargs.get('grading', [1, 1, 1])
 
         self.non_regular = kwargs.get('non_regular', False)
         self.extruded = kwargs.get('extruded', False)
@@ -1270,7 +1320,8 @@ class Block(object, metaclass=BlockMetaMock):
             cell_zone = None
 
         return f"hex ({' '.join(['v' + str(x.id) for x in corrected_vertices])}) {cell_zone} " \
-               f"({self.num_cells[0]} {self.num_cells[1]} {self.num_cells[2]}) simpleGrading (1 1 1)   " \
+               f"({self.num_cells[0]} {self.num_cells[1]} {self.num_cells[2]}) " \
+               f"simpleGrading ({self.grading[0]} {self.grading[1]} {self.grading[2]})" \
                f"// block {self.id}"
 
     # @property
@@ -2014,6 +2065,9 @@ class BlockMesh(object):
     def fix_inconsistent_block_faces(self, block_ids):
         logger.info(f'Fixing inconsistent block faces for Blocks {block_ids}')
         blocks = [Block.instances[x] for x in block_ids]
+
+        for block in Block.instances:
+            block.num_cells = None
 
         edges_set = []
         for edge in blocks[1].block_edges:

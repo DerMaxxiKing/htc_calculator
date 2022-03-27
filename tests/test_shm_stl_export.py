@@ -3,12 +3,16 @@ from src.htc_calculator.activated_reference_face import ActivatedReferenceFace
 from src.htc_calculator.construction import Solid, Layer, ComponentConstruction
 from src.htc_calculator.buildin_materials import water, aluminium
 from src.htc_calculator.meshing.buildin_pipe_sections.tube_with_wall_optimized import pipe_section
-
 from src.htc_calculator import OFCase, TabsBC
+from src.htc_calculator import config
+
+
+config.n_proc = 8
 
 
 pipe_section.materials = [water, aluminium]
-
+pipe_section.cell_size = [None, None, 25]
+pipe_section.n_cell = [15, 15, None]
 
 # vertices = np.array([[0, 0, 0],
 #                      [5000, 0, 0],
@@ -81,6 +85,8 @@ tabs1 = ActivatedReferenceFace(vertices=vertices,
                                tube_edge_distance=300,
                                bending_radius=100,
                                tube_side_1_offset=100,
+                               default_mesh_size=50,
+                               default_arc_cell_size=10,
                                name='test1')
 
 my_bc = TabsBC(inlet_volume_flow=4.1666e-5,
@@ -90,13 +96,14 @@ my_bc = TabsBC(inlet_volume_flow=4.1666e-5,
                top_htc=10,
                bottom_htc=5.8884,
                initial_temperature=293.15,
-               initial_temperatures={water: 293.16,
+               initial_temperatures={water: 323.15,
                                      aluminium: 293.16,
                                      concrete: 293.16,
                                      rockwool: 293.16})
 
 case = OFCase(reference_face=tabs1,
-              bc=my_bc)
+              bc=my_bc,
+              n_proc=12)
 case.run()
 
 #

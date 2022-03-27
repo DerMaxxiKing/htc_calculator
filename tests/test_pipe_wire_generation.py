@@ -27,13 +27,13 @@ def test_length():
             reference_wire = FCPart.makePolygon([*points, points[0]])
             reference_face = FCPart.Face(reference_wire)
 
-            pipe_wire = create_pipe_wire(reference_face,
-                                         start_edge=0,
-                                         tube_distance=225,
-                                         tube_edge_distance=300,
-                                         bending_radius=100,
-                                         tube_diameter=20
-                                         )
+            pipe_wire, _ = create_pipe_wire(reference_face,
+                                            start_edge=0,
+                                            tube_distance=225,
+                                            tube_edge_distance=300,
+                                            bending_radius=100,
+                                            tube_diameter=20
+                                            )
 
             pipe_wires.append((pipe_wire, reference_face))
 
@@ -51,13 +51,13 @@ def test_polygon(vertices):
     reference_wire = FCPart.makePolygon([*points, points[0]])
     reference_face = FCPart.Face(reference_wire)
 
-    pipe_wire = create_pipe_wire(reference_face,
-                                 start_edge=0,
-                                 tube_distance=225,
-                                 tube_edge_distance=300,
-                                 bending_radius=100,
-                                 tube_diameter=20
-                                 )
+    pipe_wire, _ = create_pipe_wire(reference_face,
+                                    start_edge=0,
+                                    tube_distance=225,
+                                    tube_edge_distance=300,
+                                    bending_radius=100,
+                                    tube_diameter=20
+                                    )
 
     export_objects([pipe_wire, reference_face], '/tmp/pipe_wires_poly1.FCStd')
 

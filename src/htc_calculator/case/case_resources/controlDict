@@ -22,13 +22,13 @@ startTime       0;
 
 stopAt          endTime;
 
-endTime         1000;
+endTime         10000;
 
-deltaT          1;
+deltaT          100;
 
 writeControl    adjustableRunTime;
 
-writeInterval   100;
+writeInterval   10;
 
 purgeWrite      0;
 
@@ -48,6 +48,7 @@ adjustTimeStep  off;
 
 functions
 {
+<function_objects>
 }
 
 // ************************************************************************* //

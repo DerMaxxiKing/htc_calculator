@@ -18,4 +18,4 @@ import sys
 
 
 work_dir = '/tmp'
-n_proc = 4
+n_proc = 8

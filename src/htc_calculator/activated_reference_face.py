@@ -7,6 +7,7 @@ from .reference_face import ReferenceFace
 from .tools import project_point_on_line, export_objects
 from .face import Face
 from .solid import Solid, PipeSolid
+from .meshing import block_mesh as imp_block_mesh
 from .meshing.block_mesh import create_blocks_from_2d_mesh, BlockMesh, \
     CompBlock, NoNormal, bottom_side_patch, top_side_patch, CellZone, wall_patch
 from .logger import logger
@@ -40,6 +41,8 @@ class ActivatedReferenceFace(ReferenceFace):
         self.plain_reference_face_solid = ReferenceFace(*args, **kwargs)
         self.case = kwargs.get('case', None)
 
+        self.default_mesh_size = kwargs.get('default_mesh_size', 100)
+        self.default_arc_cell_size = kwargs.get('default_arc_cell_size', 20)
         self.pipe_section = kwargs.get('pipe_section')
         self.tube_diameter = kwargs.get('tube_diameter', 0.02)
         self.tube_inner_diameter = kwargs.get('tube_inner_diameter', 0.016)
@@ -383,6 +386,9 @@ class ActivatedReferenceFace(ReferenceFace):
 
         self.update_cell_zone()
         self.update_boundary_conditions()
+
+        imp_block_mesh.default_cell_size = self.default_mesh_size
+        imp_block_mesh.default_arc_cell_size = self.default_arc_cell_size
 
         block_mesh = BlockMesh(name=self.name)
         block_mesh.init_case()

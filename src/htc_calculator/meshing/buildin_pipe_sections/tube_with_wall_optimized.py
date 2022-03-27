@@ -72,7 +72,7 @@ def vertex_gen_fcn(start_point, face_normal, perp_vec, tube_inner_diameter, tube
 
 
 n_edge_tube = 10
-n_inner_pipe = 7
+n_inner_pipe = 10
 n_tube_thickness = 3
 
 edge_def = [([0, 1], 'line', n_edge_tube),           # Edge 0          # inner pipe edges
@@ -190,6 +190,20 @@ block_outlet_faces = [(0, [1]),
                       (4, [1]),
                       ]
 
+grading = [[1, 1, 1],   # Block 0
+           [0.33, 1, 1],   # Block 1
+           [0.33, 1, 1],   # Block 2
+           [0.33, 1, 1],   # Block 3
+           [0.33, 1, 1],   # Block 4
+           [1, 1, 1],   # Block 5
+           [1, 1, 1],   # Block 6
+           [1, 1, 1],   # Block 7
+           [1, 1, 1],   # Block 8
+           [1, 1, 1],   # Block 9
+           [1, 1, 1],   # Block 10
+           [1, 1, 1],   # Block 11
+           [1, 1, 1]]
+
 # define which faces are on top side and bottom side:
 top_side = {11: [3]}          # block id, face id
 bottom_side = {9: [3]}       # block id, face id
@@ -204,6 +218,7 @@ pipe_section = PipeSection(name='Plain Tube',
                            cell_zone_ids=[cell_zone_ids, outer_cell_zones_ids],
                            n_cell=n_cell,
                            cell_size=cell_size,
+                           grading=grading,
                            pipe_wall_def=pipe_wall_def,
                            block_inlet_faces=block_inlet_faces,
                            block_outlet_faces=block_outlet_faces,

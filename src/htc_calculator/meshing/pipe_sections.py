@@ -28,6 +28,7 @@ class PipeSection(object):
 
         self.n_cell = kwargs.get('n_cell')                                          #
         self.cell_size = kwargs.get('cell_size')
+        self.grading = kwargs.get('grading')
 
         self.pipe_wall_def = kwargs.get('pipe_wall_def')
 
@@ -128,6 +129,7 @@ class PipeSection(object):
                               edge=edge,
                               block_edges=block_edges,
                               num_cells=n_cell,
+                              grading=self.grading[i],
                               cell_zone=cell_zone,
                               extruded=True,
                               check_merge_patch_pairs=False,

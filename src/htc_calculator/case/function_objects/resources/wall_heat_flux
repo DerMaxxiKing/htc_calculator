@@ -1,0 +1,7 @@
+<func_name>
+{
+    type        wallHeatFlux;
+    libs        ("libfieldFunctionObjects.so");
+    region      <cell_zone>;
+    patches     ("<patch_names>");
+}

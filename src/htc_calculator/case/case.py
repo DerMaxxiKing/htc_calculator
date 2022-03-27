@@ -11,8 +11,8 @@ from ..meshing.block_mesh import BlockMesh, inlet_patch, outlet_patch, wall_patc
 from ..construction import write_region_properties, Fluid, Solid
 from .boundary_conditions.user_bcs import SolidFluidInterface, FluidSolidInterface
 from .. import config
+from .function_objects.function_object import FOMetaMock
 
-from PyFoam.Applications.Decomposer import Decomposer
 from .of_parser import CppDictParser
 
 try:
@@ -74,6 +74,8 @@ class OFCase(object):
         self.case_dir = kwargs.get('case_dir', None)
         self.bc = kwargs.get('bc', None)
 
+        self.function_objects = FOMetaMock.instances
+
     @property
     def n_proc(self):
         if self._n_proc is None:
@@ -107,13 +109,13 @@ class OFCase(object):
     @property
     def control_dict(self):
         if self._control_dict is None:
-            self._control_dict = pkg_resources.read_text(case_resources, 'controlDict')
+            control_dict = pkg_resources.read_text(case_resources, 'controlDict')
+            control_dict = control_dict.replace('<function_objects>', '')
+            self._control_dict = control_dict
         return self._control_dict
 
     @control_dict.setter
     def control_dict(self, value):
-        if value == self._control_dict:
-            return
         self._control_dict = value
 
     @property
@@ -294,6 +296,29 @@ class OFCase(object):
 
         return True
 
+    def run_parafoam(self):
+        logger.info(f'Running paraFoam initialization....')
+        res = subprocess.run(["/bin/bash", "-i", "-c", "paraFoam -touchAll"],
+                             capture_output=True,
+                             cwd=self.case_dir,
+                             user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            logger.info(f"Successfully ran paraFoam initialization \n\n{output}")
+        else:
+            logger.error(f"{res.stderr.decode('ascii')}")
+        return True
+
+    def add_function_objects(self):
+        control_dict = pkg_resources.read_text(case_resources, 'controlDict')
+
+        fo_dict_entry = ''
+        for fo in FOMetaMock.instances:
+            fo_dict_entry += fo.dict_entry + '\n'
+
+        control_dict = control_dict.replace('<function_objects>', fo_dict_entry)
+        self.control_dict = control_dict
+
     def run(self):
 
         _ = self.reference_face.pipe_comp_blocks
@@ -305,7 +330,6 @@ class OFCase(object):
         self.reference_face.update_boundary_conditions()
 
         self.block_mesh.init_case()
-
         self.write_control_dict()
         self.write_decompose_par_dict()
         self.write_all_mesh()
@@ -361,6 +385,8 @@ class OFCase(object):
             cell_zone.update_bcs()
             cell_zone.write_bcs(self.case_dir)
 
+        self.add_function_objects()
+        self.write_control_dict()
         self.run_decompose_par()
 
         logger.debug('bla bla')
