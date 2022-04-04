@@ -141,10 +141,10 @@ outer_edge_indices = [[8, 12, 16, 13],       # Block 5
                       ]
 
 # number of cells; if None number of cells is calculated by block length and cell_size
-n_cell = [10, 10, None]
+n_cell = [5, 5, None]
 
 # size of cells in mm; if None n_cell must be defined
-cell_size = [None, None, 50]
+cell_size = [None, None, 100]
 
 inner_cell_zone = CellZone(new=True)
 outer_cell_zone = CellZone(new=True)
@@ -208,6 +208,8 @@ grading = [[1, 1, 1],   # Block 0
 top_side = {11: [3]}          # block id, face id
 bottom_side = {9: [3]}       # block id, face id
 
+merge_patch_pairs = [{}, {}]
+
 pipe_section = PipeSection(name='Plain Tube',
                            layer_vertex_gen_function=vertex_gen_fcn,
                            edge_def=[edge_def, outer_edge_def],
@@ -219,6 +221,7 @@ pipe_section = PipeSection(name='Plain Tube',
                            n_cell=n_cell,
                            cell_size=cell_size,
                            grading=grading,
+                           merge_patch_pairs=merge_patch_pairs,
                            pipe_wall_def=pipe_wall_def,
                            block_inlet_faces=block_inlet_faces,
                            block_outlet_faces=block_outlet_faces,

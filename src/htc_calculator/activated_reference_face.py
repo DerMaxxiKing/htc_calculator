@@ -8,7 +8,7 @@ from .tools import project_point_on_line, export_objects
 from .face import Face
 from .solid import Solid, PipeSolid
 from .meshing import block_mesh as imp_block_mesh
-from .meshing.block_mesh import create_blocks_from_2d_mesh, BlockMesh, \
+from .meshing.block_mesh import create_blocks_from_2d_mesh, Mesh, BlockMesh, \
     CompBlock, NoNormal, bottom_side_patch, top_side_patch, CellZone, wall_patch
 from .logger import logger
 from .tools import export_objects, split_wire_by_projected_vertices
@@ -38,6 +38,10 @@ class ActivatedReferenceFace(ReferenceFace):
         self._case = None
         self._layer_interface_planes = None
 
+        self.pipe_mesh = Mesh(name='pipe_mesh')
+        self.construction_mesh = Mesh(name='construction_mesh')
+
+        self.case = kwargs.get('case', OFCase(reference_face=self))
         self.plain_reference_face_solid = ReferenceFace(*args, **kwargs)
         self.case = kwargs.get('case', None)
 
@@ -152,6 +156,8 @@ class ActivatedReferenceFace(ReferenceFace):
 
     def create_o_grid_with_section(self):
 
+        self.pipe_mesh.activate()
+
         logger.info(f'Generation o-grid blocks for pipe...')
 
         wire = self.pipe.pipe_wire
@@ -193,6 +199,8 @@ class ActivatedReferenceFace(ReferenceFace):
         return pipe_comp_block
 
     def create_free_blocks(self):
+
+        self.construction_mesh.activate()
 
         logger.info(f'Creating free block mesh for {self.name}, {self.id}')
 
@@ -244,6 +252,9 @@ class ActivatedReferenceFace(ReferenceFace):
         return free_comp_block
 
     def extrude_pipe_layer(self):
+
+        self.construction_mesh.activate()
+
         logger.info('Extruding pipe layer')
 
         # top side:
@@ -275,7 +286,10 @@ class ActivatedReferenceFace(ReferenceFace):
                     extrude_to = face.vertices[0].fc_vertex.toShape().distToShape(layer_interface_planes[0])[0] > np.cumsum(layer_thicknesses)
                     ext_dist = 0
                     for dist in [face.vertices[0].fc_vertex.toShape().distToShape(x)[0] for x in layer_interface_planes[extrude_to]]:
-                        new_block = face.extrude(dist, direction=-self.normal, dist2=ext_dist)
+                        try:
+                            new_block = face.extrude(dist, direction=-self.normal, dist2=ext_dist)
+                        except Exception as e:
+                            raise e
                         new_blocks.append(new_block)
                         ext_dist = dist
             # export_objects([x.fc_solid for x in new_blocks], '/tmp/new_blocks.FCStd')

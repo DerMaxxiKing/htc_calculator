@@ -1,8 +1,10 @@
 import copy
+import subprocess
 import os.path
 import uuid
 import itertools
 import numpy as np
+from re import findall, MULTILINE
 from functools import lru_cache, wraps
 from ..logger import logger
 from ..tools import vector_to_np_array, perpendicular_vector, export_objects, angle_between_vectors, array_row_intersection
@@ -55,34 +57,168 @@ def np_cache(function):
     return wrapper
 
 
-class VertexMetaMock(type):
+class CustomID(object):
+
+    def __next__(self):
+        return uuid.uuid4()
+
+
+class MeshMetaMock(type):
+
+    instances = dict()
+
+    def __call__(cls, *args, **kwargs):
+        obj = cls.__new__(cls, *args, **kwargs)
+        obj.__init__(*args, **kwargs)
+        # cls.instances.append(obj)
+        cls.instances[obj.id] = obj
+        return obj
+
+
+class Mesh(object, metaclass=MeshMetaMock):
 
     instances = {}
 
-    @staticmethod
-    # @np_cache
-    def get_vertex(position):
+    def __init__(self, *args, **kwargs):
+        self.id = kwargs.get('id', uuid.uuid4())
+        self.name = kwargs.get('name', 'unnamed_mesh')
+
+        self.vertices = {}
+        self.vertex_ids = {}
+        self.edges = {}
+        self.edge_ids = {}
+        self.parallel_edges = []
+        self.faces = {}
+        self.patch_pairs = {}
+        self.boundaries = {}
+        self.blocks = []
+        self.cell_zones = []
+        self.comp_blocks = []
+
+        self.vertex_id_counter = CustomID()
+        self.edge_id_counter = CustomID()
+        self.parallel_edge_id_counter = CustomID()
+        self.faces_id_counter = CustomID()
+        self.patch_pairs_id_counter = CustomID()
+        self.boundary_id_counter = CustomID()
+        self.block_id_counter = CustomID()
+        self.cell_zone_id_counter = CustomID()
+
+        self.dict_vertex_id_counter = itertools.count()
+        self.dict_edge_id_counter = itertools.count()
+        self.dict_parallel_edge_id_counter = itertools.count()
+        self.dict_faces_id_counter = itertools.count()
+        self.dict_patch_pairs_id_counter = itertools.count()
+        self.dict_boundary_id_counter = itertools.count()
+        self.dict_block_id_counter = itertools.count()
+        self.dict_cell_zone_id_counter = itertools.count()
+
+    def activate(self):
+        VertexMetaMock.current_mesh = self
+        EdgeMetaMock.current_mesh = self
+        ParallelEdgeSetMetaMock.current_mesh = self
+        FaceMetaMock.current_mesh = self
+        PatchPairMetaMock.current_mesh = self
+        BoundaryMetaMock.current_mesh = self
+        BlockMetaMock.current_mesh = self
+        CellZoneMetaMock.current_mesh = self
+        CompBlockMetaMock.current_mesh = self
+
+    @property
+    def txt_id(self):
+        if isinstance(self.id, uuid.UUID):
+            return 'mesh_' + str(self.id.hex)
+        else:
+            return str(self.id)
+
+
+default_mesh = Mesh()
+
+
+class VertexMetaMock(type):
+
+    current_mesh = default_mesh
+
+    @property
+    def id_iter(cls):
+        return cls.current_mesh.vertex_id_counter
+
+    @property
+    def dict_id_iter(cls):
+        return cls.current_mesh.dict_vertex_id_counter
+
+        # @np_cache
+
+    def get_vertex(cls, position):
         # logger.debug('Getting vertex...')
         # return next((x for x in VertexMetaMock.instances if np.allclose(x.position, position, atol=1e-3)), None)
-        vert = VertexMetaMock.instances.get(tuple(position), None)
+        vert = cls.instances.get(tuple(position), None)
+        # if vert is not None:
+        #     logger.debug('Vertex already existing')
+        return vert
+
+    def get_duplicate(cls, duplicate):
+        vert = cls.instances.get(duplicate, None)
         # if vert is not None:
         #     logger.debug('Vertex already existing')
         return vert
 
     def __call__(cls, *args, **kwargs):
         position = np.round(kwargs.get('position', np.array([0, 0, 0])), 3)
-        obj = cls.get_vertex(position)
+        duplicate = kwargs.get('duplicate', False)
+        obj = None
+        if duplicate:
+            # obj = cls.get_duplicate(duplicate)
+            pass
+        else:
+            obj = cls.get_vertex(position)
         if obj is None:
             obj = cls.__new__(cls, *args, **kwargs)
             obj.__init__(*args, **kwargs)
             # cls.instances.append(obj)
-            cls.instances[tuple(position)] = obj
+            if duplicate:
+                cls.instances[duplicate] = obj
+            else:
+                cls.instances[tuple(position)] = obj
+            cls.vertex_ids[obj.id] = obj
         return obj
+
+    @property
+    def instances(cls):
+        return cls.current_mesh.vertices
+
+    @property
+    def vertex_ids(cls):
+        return cls.current_mesh.vertex_ids
+
+    def in_current_mesh(cls, vertex):
+        in_mesh_vertex = None
+        if vertex.id in cls.vertex_ids.keys():
+            in_mesh_vertex = vertex
+        else:
+            for mesh in Mesh.instances.values():
+                if mesh is BlockMeshVertex.current_mesh:
+                    continue
+                if vertex.id in mesh.vertex_ids.keys():
+                    in_mesh_vertex = BlockMeshVertex(position=mesh.vertex_ids[vertex.id].position)
+        return in_mesh_vertex
 
 
 class EdgeMetaMock(type):
 
-    instances = {}
+    current_mesh = default_mesh
+
+    @property
+    def id_iter(cls):
+        return cls.current_mesh.edge_id_counter
+
+    @property
+    def dict_id_iter(cls):
+        return cls.current_mesh.dict_edge_id_counter
+
+    @property
+    def edge_ids(cls):
+        return cls.current_mesh.edge_ids
 
     def get_edge(self,
                  vertices=None,
@@ -91,15 +227,19 @@ class EdgeMetaMock(type):
         # logger.debug('Getting edge...')
         # return next((x for x in EdgeMetaMock.instances if np.array_equal(x.vertices, vertices)), None)
         if vertices is not None:
-            edge = EdgeMetaMock.instances.get(tuple(sorted([vertices[0].id, vertices[1].id])), None)
+            edge = self.instances.get(tuple(sorted([vertices[0].id, vertices[1].id])), None)
         elif vertex_ids is not None:
-            edge = EdgeMetaMock.instances.get(vertex_ids, None)
+            edge = self.instances.get(vertex_ids, None)
         # if edge is None:
         #     edge = EdgeMetaMock.instances.get((vertices[1].id, vertices[0].id), None)
         if edge is None:
             if create:
-                edge = self(vertices=[list(BlockMeshVertex.instances.values())[vertex_ids[0]],
-                                      list(BlockMeshVertex.instances.values())[vertex_ids[1]]])
+                # edge = self(vertices=[list(BlockMeshVertex.instances.values())[vertex_ids[0]],
+                #                       list(BlockMeshVertex.instances.values())[vertex_ids[1]]])
+
+                edge = self(vertices=[BlockMeshVertex.vertex_ids[vertex_ids[0]],
+                                      BlockMeshVertex.vertex_ids[vertex_ids[1]]])
+
         # if edge is not None:
         #     logger.debug('Edge already existing')
         return edge
@@ -112,12 +252,40 @@ class EdgeMetaMock(type):
             obj.__init__(*args, **kwargs)
             # cls.instances.append(obj)
             cls.instances[tuple(sorted([vertices[0].id, vertices[1].id]))] = obj
+            cls.edge_ids[obj.id] = obj
         return obj
+
+    @property
+    def instances(cls):
+        return cls.current_mesh.edges
+
+    def in_current_mesh(cls, edge):
+        in_mesh_edge = None
+        if edge.id in cls.edge_ids.keys():
+            in_mesh_edge = edge
+        else:
+            for mesh in Mesh.instances.values():
+                if mesh is BlockMeshEdge.current_mesh:
+                    continue
+                if edge.id in mesh.edge_ids.keys():
+                    init_dict = edge.__dict__
+                    init_dict['vertices'] = [BlockMeshVertex(position=edge.vertices[0].position),
+                                             BlockMeshVertex(position=edge.vertices[1].position)]
+                    in_mesh_edge = BlockMeshEdge(**init_dict)
+        return in_mesh_edge
 
 
 class ParallelEdgeSetMetaMock(type):
 
-    instances = []
+    current_mesh = default_mesh
+
+    @property
+    def id_iter(cls):
+        return cls.current_mesh.parallel_edge_id_counter
+
+    @property
+    def dict_id_iter(cls):
+        return cls.current_mesh.dict_parallel_edge_id_counter
 
     def __call__(cls, *args, **kwargs):
         obj = cls.__new__(cls, *args, **kwargs)
@@ -126,17 +294,28 @@ class ParallelEdgeSetMetaMock(type):
         cls.instances.append(obj)
         return obj
 
+    @property
+    def instances(cls):
+        return cls.current_mesh.parallel_edges
+
 
 class FaceMetaMock(type):
 
-    instances = {}
+    current_mesh = default_mesh
 
-    @staticmethod
-    def get_face(vertices):
+    @property
+    def id_iter(cls):
+        return cls.current_mesh.faces_id_counter
+
+    @property
+    def dict_id_iter(cls):
+        return cls.current_mesh.dict_faces_id_counter
+
+    def get_face(cls, vertices):
         # logger.debug('Getting face...')
         # raise NotImplementedError
         # return next((x for x in EdgeMetaMock.instances if np.array_equal(x.vertices, vertices)), None)
-        face = FaceMetaMock.instances.get(tuple(sorted(vertices)), None)
+        face = cls.instances.get(tuple(sorted(vertices)), None)
         # if face is not None:
         #     logger.debug('Face already existing')
         return face
@@ -151,10 +330,57 @@ class FaceMetaMock(type):
             cls.instances[tuple(sorted(vertices))] = obj
         return obj
 
+    @property
+    def instances(cls):
+        return cls.current_mesh.faces
+
+
+class PatchPairMetaMock(type):
+
+    current_mesh = default_mesh
+
+    @property
+    def id_iter(cls):
+        return cls.current_mesh.patch_pairs_id_counter
+
+    @property
+    def dict_id_iter(cls):
+        return cls.current_mesh.dict_patch_pairs_id_counter
+
+    def get_patch_pair(cls, face_id):
+        # logger.debug('Getting face...')
+        # raise NotImplementedError
+        # return next((x for x in EdgeMetaMock.instances if np.array_equal(x.vertices, vertices)), None)
+        patch_pair = cls.instances.get(face_id, None)
+        # if face is not None:
+        #     logger.debug('Face already existing')
+        return patch_pair
+
+    def __call__(cls, *args, **kwargs):
+        face_id = kwargs.get('surface').id
+        obj = cls.get_patch_pair(face_id)
+        if obj is None:
+            obj = cls.__new__(cls, *args, **kwargs)
+            obj.__init__(*args, **kwargs)
+            cls.instances[face_id] = obj
+        return obj
+
+    @property
+    def instances(cls):
+        return cls.current_mesh.patch_pairs
+
 
 class BoundaryMetaMock(type):
 
-    instances = {}
+    current_mesh = default_mesh
+
+    @property
+    def id_iter(cls):
+        return cls.current_mesh.boundary_id_counter
+
+    @property
+    def dict_id_iter(cls):
+        return cls.current_mesh.dict_boundary_id_counter
 
     def get_boundary_by_name(cls, name):
         return next((x for x in cls.instances if x.name == name), None)
@@ -169,10 +395,22 @@ class BoundaryMetaMock(type):
         cls.instances[kwargs.get('name')] = obj
         return obj
 
+    @property
+    def instances(cls):
+        return cls.current_mesh.boundaries
+
 
 class BlockMetaMock(type):
 
-    instances = []
+    current_mesh = default_mesh
+
+    @property
+    def id_iter(cls):
+        return cls.current_mesh.block_id_counter
+
+    @property
+    def dict_id_iter(cls):
+        return cls.current_mesh.dict_block_id_counter
 
     @staticmethod
     @np_cache
@@ -195,15 +433,26 @@ class BlockMetaMock(type):
         cls._comp_solid = None
         return obj
 
+    @property
+    def instances(cls):
+        return cls.current_mesh.blocks
+
 
 class CellZoneMetaMock(type):
 
-    instances = []
+    current_mesh = default_mesh
 
-    @staticmethod
-    def get_cell_zone(material):
+    @property
+    def id_iter(cls):
+        return cls.current_mesh.cell_zone_id_counter
+
+    @property
+    def dict_id_iter(cls):
+        return cls.current_mesh.dict_cell_zone_id_counter
+
+    def get_cell_zone(cls, material):
         # logger.debug('Getting CellZone...')
-        return next((x for x in CellZoneMetaMock.instances if x.material is material), None)
+        return next((x for x in cls.instances if x.material is material), None)
 
     def __call__(cls, *args, **kwargs):
         material = kwargs.get('material', None)
@@ -218,10 +467,14 @@ class CellZoneMetaMock(type):
             cls.instances.append(obj)
         return obj
 
+    @property
+    def instances(cls):
+        return cls.current_mesh.cell_zones
+
 
 class CompBlockMetaMock(type):
 
-    instances = []
+    current_mesh = default_mesh
 
     def __call__(cls, *args, **kwargs):
         obj = cls.__new__(cls, *args, **kwargs)
@@ -229,25 +482,37 @@ class CompBlockMetaMock(type):
         cls.instances.append(obj)
         return obj
 
+    @property
+    def instances(cls):
+        return cls.current_mesh.comp_blocks
+
 
 class BlockMeshVertex(object, metaclass=VertexMetaMock):
-    id_iter = itertools.count()
+
+    # id_iter = VertexMetaMock.current_mesh.vertex_id_counter
 
     @classmethod
-    def block_mesh_entry(cls):
-        vertex_entries = [None] * cls.instances.values().__len__()
-        for i, vertex in enumerate(VertexMetaMock.instances.values()):
+    def block_mesh_entry(cls, vertices=None):
+        if vertices is None:
+            vertices = cls.instances.values()
+
+        vertex_entries = [None] * vertices.__len__()
+        for i, vertex in enumerate(vertices):
             vertex_entries[i] = '\t' + vertex.dict_entry
         return f'vertices\n(\n' + "\n".join(vertex_entries) + '\n);\n'
 
     def __init__(self, *args, **kwargs):
         self.id: int = next(BlockMeshVertex.id_iter)
+        self.dict_id = next(BlockMeshVertex.dict_id_iter)
         self.position = kwargs.get('position', np.array([0, 0, 0]))
         self._fc_vertex = None
 
         self.edges = set()
         self.faces = set()
         self.blocks = set()
+
+        self.duplicated = kwargs.get('duplicated', False)
+        self.duplicates = set()
 
     def __add__(self, vec):
         return BlockMeshVertex(position=self.position + vec)
@@ -256,14 +521,24 @@ class BlockMeshVertex(object, metaclass=VertexMetaMock):
         return BlockMeshVertex(position=self.position - vec)
 
     def __repr__(self):
-        return f'Vertex {self.id} (position={self.position[0], self.position[1], self.position[2]})'
+        return f'Vertex {self.id} (position={self.position[0], self.position[1], self.position[2]}), ' \
+               f'duplicate: {[x.id for x in self.duplicates]}'
 
     @property
     def txt_id(self):
-        if isinstance(self.id, uuid.UUID):
-            return 'a' + str(self.id.hex)
+        if isinstance(self.dict_id, uuid.UUID):
+            vertex_id = str(self.dict_id.hex)
         else:
-            return str(self.id)
+            vertex_id = str(self.dict_id)
+
+        if self.duplicated:
+            return 'dv' + vertex_id
+        else:
+            return 'v' + vertex_id
+        # if isinstance(self.id, uuid.UUID):
+        #     return 'a' + str(self.id.hex)
+        # else:
+        #     return str(self.id)
 
     @property
     def fc_vertex(self):
@@ -273,11 +548,45 @@ class BlockMeshVertex(object, metaclass=VertexMetaMock):
 
     @property
     def dict_entry(self):
-        return f'name v{self.id} ({self.position[0]:16.6f} {self.position[1]:16.6f} {self.position[2]:16.6f}) ' \
+
+        return f'name {self.txt_id} ({self.position[0]:16.6f} {self.position[1]:16.6f} {self.position[2]:16.6f}) ' \
                f'// vertex {self.id}'
+
+        # if self.duplicated:
+        #     return f'name dv{list(self.duplicates)[0].id} ' \
+        #            f'({self.position[0]:16.6f} {self.position[1]:16.6f} {self.position[2]:16.6f}) ' \
+        #            f'// vertex {self.id}'
+        # else:
+        #     return f'name v{self.id} ({self.position[0]:16.6f} {self.position[1]:16.6f} {self.position[2]:16.6f}) ' \
+        #            f'// vertex {self.id}'
 
     def dist_to_point(self, vertex):
         return np.linalg.norm(self.position - vertex.position)
+
+    def duplicate(self):
+
+        if self.duplicated:
+            return self
+
+        try:
+            duplicate = BlockMeshVertex(position=self.position,
+                                        duplicate=self,
+                                        duplicated=True)
+
+            self.duplicates.add(duplicate)
+            duplicate.duplicates.add(self)
+
+            # duplicate edges:
+            for edge in self.edges:
+                vertices = copy.copy(edge.vertices)
+                if duplicate not in vertices:
+                    vertices[vertices.index(self)] = duplicate
+                    edge.duplicate(vertices=vertices)
+        except Exception as e:
+            logger.error(f'Error duplicating vertex {self}:\n{e}')
+            raise e
+
+        return duplicate
 
     def __lt__(self, obj):
         return self.id < obj.id
@@ -299,12 +608,15 @@ class BlockMeshVertex(object, metaclass=VertexMetaMock):
 
 
 class BlockMeshEdge(object, metaclass=EdgeMetaMock):
-    id_iter = itertools.count()
+    # id_iter = itertools.count()
 
     @classmethod
-    def block_mesh_entry(cls):
+    def block_mesh_entry(cls, edges=None):
 
-        edge_entries = ['\t' + x.dict_entry for x in EdgeMetaMock.instances.values() if x.dict_entry is not None]
+        if edges is None:
+            edges = cls.instances.values()
+
+        edge_entries = ['\t' + x.dict_entry for x in edges if x.dict_entry is not None]
 
         # edge_entries = [None] * cls.instances.values().__len__()
         # for i, edge in enumerate(EdgeMetaMock.instances.values()):
@@ -323,6 +635,7 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
                         line	        Straight line	    —
         """
         self.id = next(BlockMeshEdge.id_iter)
+        self.dict_id = next(BlockMeshEdge.dict_id_iter)
         self.vertices = kwargs.get('vertices')
 
         self.type = kwargs.get('type', 'line')      # arc or line
@@ -346,6 +659,7 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
         self.blocks = set()
 
         self._parallel_edge_set = None
+        self.duplicates = set()
 
     @property
     def txt_id(self):
@@ -427,7 +741,7 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
             return None
             # return f'line v{self.vertices[0].id} v{self.vertices[1].id}'
         elif self.type == 'arc':
-            return f'arc {self.vertices[0].id} {self.vertices[1].id} ' \
+            return f'arc {self.vertices[0].txt_id} {self.vertices[1].txt_id} ' \
                    f'({self.interpolation_points[0][0]:16.6f} ' \
                    f'{self.interpolation_points[0][1]:16.6f} ' \
                    f'{self.interpolation_points[0][2]:16.6f})'
@@ -470,10 +784,19 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
                              interpolation_points=interpolation_points
                              )
 
+    def duplicate(self, vertices):
+
+        init_dict = self.__dict__
+        init_dict['vertices'] = vertices
+        duplicate = BlockMeshEdge(**init_dict)
+        duplicate.duplicates.add(self)
+        self.duplicates.add(duplicate)
+        return duplicate
+
 
 class ParallelEdgesSet(object, metaclass=ParallelEdgeSetMetaMock):
 
-    id_iter = itertools.count()
+    # id_iter = itertools.count()
 
     @classmethod
     def get_edges_set(cls, edge):
@@ -483,14 +806,20 @@ class ParallelEdgesSet(object, metaclass=ParallelEdgeSetMetaMock):
         return None
 
     @classmethod
-    def merge_sets(cls):
+    def merge_sets(cls, pe_sets=None):
+
+        if pe_sets is None:
+            pe_sets = cls.instances
 
         do_merge = True
 
+        new_pe_set = copy.copy(pe_sets)
+
         while do_merge:
             do_merge = False
-            for instance in cls.instances:
-                for next_instance in cls.instances:
+            current_pe_set = new_pe_set
+            for instance in current_pe_set:
+                for next_instance in current_pe_set:
                     if instance == next_instance:
                         continue
                     if (instance.edges & next_instance.edges).__len__() > 0:
@@ -498,9 +827,10 @@ class ParallelEdgesSet(object, metaclass=ParallelEdgeSetMetaMock):
                         _ = [setattr(x, 'parallel_edge_set', instance) for x in next_instance.edges]
                         instance._cell_size = default_cell_size
                         instance._num_cells = None
-                        cls.instances.remove(next_instance)
+                        new_pe_set = copy.copy(current_pe_set)
+                        new_pe_set.remove(next_instance)
                         do_merge = True
-                        continue
+                        break
 
     @classmethod
     def add_set(cls, p_edges):
@@ -517,6 +847,7 @@ class ParallelEdgesSet(object, metaclass=ParallelEdgeSetMetaMock):
     def __init__(self, *args, **kwargs):
 
         self.id = next(ParallelEdgesSet.id_iter)
+        self.dict_id = next(ParallelEdgesSet.dict_id_iter)
 
         self.edges = kwargs.get('edges', set())
         self._cell_size = kwargs.get('cell_size', default_cell_size)
@@ -572,18 +903,24 @@ class ParallelEdgesSet(object, metaclass=ParallelEdgeSetMetaMock):
 
 class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
 
-    id_iter = itertools.count()
+    # id_iter = itertools.count()
 
     @classmethod
-    def block_mesh_entry(cls):
+    def block_mesh_entry(cls, boundaries=None):
         # boundary_entries = [None] * cls.instances.values().__len__()
 
-        boundary_entries = ['\t' + x.dict_entry for x in BoundaryMetaMock.instances.values() if x.dict_entry is not None]
+        if boundaries is None:
+            boundaries = cls.instances.values()
+
+        boundary_entries = [x.dict_entry for x in boundaries if x.dict_entry is not None]
+        merge_patch_entries = [x.boundary_dict_entry for x in PatchPair.instances.values()
+                               if x.boundary_dict_entry is not None]
+
         # for i, boundary in enumerate(BoundaryMetaMock.instances.values()):
         #     entry = boundary.dict_entry
         #     if entry is not None:
         #         boundary_entries[i] = '\t' + boundary.dict_entry
-        return f'boundary\n(\n' + "\n".join(boundary_entries) + '\n);\n'
+        return f'boundary\n(\n' + "\n".join([*boundary_entries, *merge_patch_entries]) + '\n);\n'
 
     def __init__(self, *args, **kwargs):
 
@@ -591,6 +928,8 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         self._function_objects = None
 
         self.id = next(BlockMeshBoundary.id_iter)
+        self.dict_id = next(BlockMeshBoundary.dict_id_iter)
+
         self.name = kwargs.get('name')
         self.type = kwargs.get('type')
         self._faces = kwargs.get('faces', set())
@@ -653,7 +992,10 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         if self.type == 'interface':
             return None
 
-        faces_entry = "\n".join(['\t\t\t(' + ' '.join([str(y.id) for y in x.vertices]) + ')' for x in self.faces])
+        if self.faces.__len__() == 0:
+            return None
+
+        faces_entry = "\n".join(['\t\t\t(' + ' '.join([str(y.txt_id) for y in x.vertices]) + ')' for x in self.faces])
 
         return (f"\t{self.txt_id + '_' + self.name}\n"
                 f"\t{'{'}\n"
@@ -719,7 +1061,7 @@ NoNormal = object()
 
 
 class BlockMeshFace(object, metaclass=FaceMetaMock):
-    id_iter = itertools.count()
+    # id_iter = itertools.count()
 
     def __init__(self, *args, **kwargs):
         """
@@ -733,10 +1075,11 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
         """
         self.name = kwargs.get('name', 'unnamed face')
         self.id = next(BlockMeshFace.id_iter)
+        self.dict_id = next(BlockMeshFace.dict_id_iter)
         self.vertices = kwargs.get('vertices')
 
         self.merge = kwargs.get('merge', True)
-        self.check_merge_patch_pairs = kwargs.get('check_merge_patch_pairs', True)
+        self.merge_patch_pairs = kwargs.get('merge_patch_pairs', True)
         self.contacts = kwargs.get('contacts', set())
 
         self._boundary = kwargs.get('boundary', None)
@@ -753,6 +1096,7 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
         self._planar = None
 
         self.extruded = kwargs.get('extruded', False)   # false or: [base_profile, top_profile, path1, path2]
+        self.patch_pair = kwargs.get('patch_pair', set())
 
         _ = [x.faces.add(self) for x in self.vertices]
 
@@ -993,10 +1337,12 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
         if direction is None:
             direction = self.normal
 
-        vertices = self.vertices
+        vertices = np.array([BlockMeshVertex.in_current_mesh(x) for x in self.vertices])
+        _ = np.array([BlockMeshEdge.in_current_mesh(x) for x in self.edges])
+
         if set(vertices).__len__() == 3:
             # vertices = list(set(self.vertices))
-            vertices = [ii for n, ii in enumerate(self.vertices) if ii not in self.vertices[:n]]
+            vertices = [ii for n, ii in enumerate(vertices) if ii not in vertices[:n]]
             non_regular = True
 
         if (dist2 is None) or (abs(dist2) < 1):
@@ -1054,6 +1400,116 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
     #         center = np.array(edge.Curve.Center) + (p1[i].position - edge.Vertexes[0].Point) * face_normal
 
 
+class PatchPair(object, metaclass=PatchPairMetaMock):
+    # id_iter = itertools.count()
+
+    @classmethod
+    def block_mesh_entry(cls, patch_pairs=None):
+        if patch_pairs is None:
+            patch_pairs = cls.instances.values()
+
+        patch_pairs_entries = [x.dict_entry for x in patch_pairs if x.dict_entry is not None]
+        return f'mergePatchPairs\n(\n' + "\n".join(patch_pairs_entries) + '\n);\n'
+
+    def __init__(self, *args, **kwargs):
+        """
+        :param args:
+        :param kwargs:
+        :keyword type:  arc	            Circular arc	    Single interpolation point
+                        simpleSpline	Spline curve	    List of interpolation points
+                        polyLine	    Set of lines	    List of interpolation points
+                        polySpline	    Set of splines	    List of interpolation points
+                        line	        Straight line	    —
+        """
+
+        self._surface = None
+        self._patches = set()
+
+        self.name = kwargs.get('name', 'unnamed PatchPair')
+        self.id = uuid.uuid4()
+        self.dict_id = uuid.uuid4()
+        self.surface = kwargs.get('surface', None)
+
+    @property
+    def surface(self):
+        return self._surface
+
+    @surface.setter
+    def surface(self, value):
+        self._surface = value
+
+    @property
+    def patches(self):
+        return self._patches
+
+    def add_patch(self, patch):
+        self._patches.add(patch)
+
+    @property
+    def boundary_dict_entry(self):
+
+        if self.surface.blocks.__len__() == 1:
+            return None
+
+        if self.patches.__len__() == 1:
+            dict_entry = f'\tmerge_{self.surface.txt_id}\n' \
+                         f"\t{'{'}\n" \
+                         f'\t\ttype patch;\n' \
+                         f"\t\tfaces\n" \
+                         f"\t\t\t(({' '.join([str(x.txt_id) for x in self.surface.vertices])}));\n" \
+                         f"\t{'}'}\n" \
+                         f'\tmerge_{list(self.patches)[0].txt_id}\n' \
+                         f"\t{'{'}\n" \
+                         f'\t\ttype patch;\n' \
+                         f"\t\tfaces\n" \
+                         f"\t\t\t(({' '.join([str(x.txt_id) for x in list(self.patches)[0].vertices])}));\n" \
+                         f"\t{'}'}\n"
+
+        elif self.patches.__len__() == 2:
+            dict_entry = f'\tmerge_{list(self.patches)[0].txt_id}\n' \
+                         f"\t{'{'}\n" \
+                         f'\t\ttype patch;\n' \
+                         f"\t\tfaces\n" \
+                         f"\t\t\t(({' '.join([str(x.txt_id) for x in list(self.patches)[0].vertices])}));\n" \
+                         f"\t{'}'}\n" \
+                         f'\tmerge_{list(self.patches)[1].txt_id}\n' \
+                         f"\t{'{'}\n" \
+                         f'\t\ttype patch;\n' \
+                         f"\t\tfaces\n" \
+                         f"\t\t\t(({' '.join([str(x.txt_id) for x in list(self.patches)[1].vertices])}));\n" \
+                         f"\t{'}'}\n"
+        else:
+            raise Exception(
+                f'Error in PatchPair {self.id}: number of patches must be 1 or 2.\nPatches are: {self.patches}')
+        return dict_entry
+
+    @property
+    def dict_entry(self):
+        if self.surface.blocks.__len__() == 1:
+            return None
+        elif self.patches.__len__() == 1:
+            return f'\t(merge_{self.surface.txt_id} merge_{list(self.patches)[0].txt_id})'
+        elif self.patches.__len__() == 2:
+            return f'\t(merge_{list(self.patches)[0]} merge_{list(self.patches)[1].txt_id})'
+        else:
+            raise Exception(
+                f'Error in PatchPair {self.id}: number of patches must be 1 or 2.\nPatches are: {self.patches}')
+
+    def __repr__(self):
+        return f'PatchPair {self.id})'
+
+    def __hash__(self):
+        return id(self)
+
+    # if type(edge.Curve) is FCPart.Line:
+    #     return [BlockMeshEdge(vertices=[p1[i], p2[i]], type='line') for i in range(4)]
+    # else:
+    #     edges = [None] * 4
+    #     for i in range(4):
+    #         # move center point
+    #         center = np.array(edge.Curve.Center) + (p1[i].position - edge.Vertexes[0].Point) * face_normal
+
+
 class Block(object, metaclass=BlockMetaMock):
 
     face_map = {
@@ -1080,6 +1536,20 @@ class Block(object, metaclass=BlockMetaMock):
 
     all_parallel_edges = np.array([[0, 2, 4, 6], [1, 3, 5, 7], [8, 9, 10, 11]])
 
+    # face_pe_sets = {0: [0, 1],
+    #                 1: [0, 1],
+    #                 2: [1, 2],
+    #                 3: [1, 2],
+    #                 4: [0, 2],
+    #                 5: [0, 2]}
+
+    face_adj = {0: [2, 3, 4, 5],
+                1: [2, 3, 4, 5],
+                2: [0, 1, 4, 5],
+                3: [0, 1, 4, 5],
+                4: [0, 1, 2, 3],
+                5: [0, 1, 2, 3]}
+
     _edge_vertex_map = [[0, 1],     # 0
                         [1, 2],     # 1
                         [2, 3],     # 2
@@ -1095,34 +1565,47 @@ class Block(object, metaclass=BlockMetaMock):
 
     _comp_solid = None
 
-    id_iter = itertools.count()
+    # id_iter = itertools.count()
+
     doc = App.newDocument()
 
     @classmethod
-    def update_parallel_edges(cls):
-        for instance in cls.instances:
+    def update_parallel_edges(cls, blocks=None):
+        if blocks is None:
+            blocks = cls.instances
+
+        for instance in blocks:
+            if instance.merge_patch_pairs:
+                continue
             instance._parallel_edges_sets = []
             for p_edges in Block.all_parallel_edges:
                 instance._parallel_edges_sets.append(ParallelEdgesSet.add_set(instance.block_edges[p_edges]))
 
     @classmethod
-    def block_mesh_entry(cls):
+    def block_mesh_entry(cls, blocks=None):
 
-        block_entries = ['\t' + x.dict_entry for x in BlockMetaMock.instances if x.dict_entry is not None]
+        if blocks is None:
+            blocks = cls.instances
+
+        block_entries = ['\t' + x.dict_entry for x in blocks if ((not x.duplicate) and (x.dict_entry is not None))]
         # block_entries = [None] * cls.instances.__len__()
         # for i, block in enumerate(BlockMetaMock.instances):
         #     block_entries[i] = '\t' + block.dict_entry
         return f'blocks\n(\n' + "\n".join(block_entries) + '\n);\n'
 
     @classmethod
-    def save_fcstd(cls, filename):
+    def save_fcstd(cls, filename, blocks=None):
         """
         save as freecad document
         :param filename: full filename; example: '/tmp/test.FCStd'
         :param shape_type: 'solid', 'faces'
+        :param blocks: block to save; default is all
         """
+        if blocks is None:
+            blocks = cls.instances
+
         doc = App.newDocument(f"Blocks")
-        for i, block in enumerate(cls.instances):
+        for i, block in enumerate(blocks):
             try:
                 __o__ = doc.addObject("Part::Feature", f'Block {block.name} {block.id}')
                 __o__.Shape = block.fc_solid
@@ -1208,6 +1691,7 @@ class Block(object, metaclass=BlockMetaMock):
         :param kwargs:
         """
 
+        self._vertices = None
         self._num_cells = None
         self._block_edges = None
         self._fc_solid = None
@@ -1215,21 +1699,10 @@ class Block(object, metaclass=BlockMetaMock):
         self._edge = None
         self._dirty_center = None
 
-        self.name = kwargs.get('name', 'unnamed_block')
-        self.id = next(Block.id_iter)
-        self.vertices = kwargs.get('vertices', [])
-        self.assigned_feature = kwargs.get('assigned_feature', None)
-        self.edge = kwargs.get('edge', None)
-        # self.num_cells = kwargs.get('num_cells', None)
-        self.block_edges = kwargs.get('block_edges', None)
-        self.cell_zone = kwargs.get('cell_zone', None)
-        self.auto_cell_size = kwargs.get('auto_cell_size', True)
-        self.cell_size = kwargs.get('cell_size', 100)
-        self.grading = kwargs.get('grading', [1, 1, 1])
-
-        self.non_regular = kwargs.get('non_regular', False)
-        self.extruded = kwargs.get('extruded', False)
-        self.check_merge_patch_pairs = kwargs.get('check_merge_patch_pairs', True)
+        self._merge_patch_pairs = False
+        self._duplicate = False
+        self._original = None
+        self._duplicated_block = None
 
         self._face0 = kwargs.get('face0', None)
         self._face1 = kwargs.get('face1', None)
@@ -1251,12 +1724,35 @@ class Block(object, metaclass=BlockMetaMock):
         self._edge10 = kwargs.get('edge10', None)
         self._edge11 = kwargs.get('edge11', None)
 
+        self.name = kwargs.get('name', 'unnamed_block')
+        self.id = next(Block.id_iter)
+        self.dict_id = next(Block.dict_id_iter)
+        self.vertices = kwargs.get('vertices', None)
+        self.patch_pairs = set()
+        self.assigned_feature = kwargs.get('assigned_feature', None)
+        self.edge = kwargs.get('edge', None)
+        self.num_cells = kwargs.get('num_cells', None)
+        self.block_edges = kwargs.get('block_edges', None)
+        self.cell_zone = kwargs.get('cell_zone', None)
+        self.auto_cell_size = kwargs.get('auto_cell_size', True)
+        self.cell_size = kwargs.get('cell_size', 100)
+        self.grading = kwargs.get('grading', [1, 1, 1])
+
+        self.non_regular = kwargs.get('non_regular', False)
+        self.extruded = kwargs.get('extruded', False)
+
+        self.original = kwargs.get('original', None)
+        self.duplicate = kwargs.get('duplicate', False)
+        self.duplicated_block = kwargs.get('duplicated_block', None)
+        self.merge_patch_pairs = kwargs.get('merge_patch_pairs', False)
+
         _ = self.block_edges
         _ = self.faces
 
         self._parallel_edges_sets = None
 
         self._parallel_edges_sets = []
+
         for p_edges in Block.all_parallel_edges:
             self._parallel_edges_sets.append(ParallelEdgesSet.add_set(self.block_edges[p_edges]))
 
@@ -1264,6 +1760,40 @@ class Block(object, metaclass=BlockMetaMock):
         self.pipe_layer_extrude_top = kwargs.get('pipe_layer_extrude_top', None)
         self.pipe_layer_bottom = kwargs.get('pipe_layer_bottom', False)
         self.pipe_layer_extrude_bottom = kwargs.get('pipe_layer_extrude_bottom', None)
+
+    @property
+    def vertices(self):
+        return self._vertices
+
+    @vertices.setter
+    def vertices(self, value):
+        if isinstance(value, list):
+            value = np.array(value)
+        self._vertices = value
+
+    @property
+    def duplicate(self):
+        return self._duplicate
+
+    @duplicate.setter
+    def duplicate(self, value):
+        self._duplicate = value
+
+    @property
+    def duplicated_block(self):
+        return self._duplicated_block
+
+    @duplicated_block.setter
+    def duplicated_block(self, value):
+        self._duplicated_block = value
+
+    @property
+    def original(self):
+        return self._original
+
+    @original.setter
+    def original(self, value):
+        self._original = value
 
     @property
     def txt_id(self):
@@ -1275,29 +1805,37 @@ class Block(object, metaclass=BlockMetaMock):
     @property
     def dict_entry(self):
 
+        if self.duplicated_block is None:
+            vertices = self.vertices
+        elif isinstance(self.duplicated_block, Block):
+            vertices = self.duplicated_block.vertices
+        else:
+            raise Exception(f'Error creating dict entry for Block {self.id}:\n'
+                            f'DuplicatedBlock must be None or instance of Block but is {type(self.duplicated_block)}')
+
         # export_objects([self.fc_solid, *[x.fc_vertex.toShape() for x in self.vertices]], '/tmp/test_export.FCStd')
 
         if self.non_regular:
-            v0 = self.vertices[2].fc_vertex.toShape().Point - self.vertices[1].fc_vertex.toShape().Point
-            v1 = self.vertices[0].fc_vertex.toShape().Point - self.vertices[1].fc_vertex.toShape().Point
-            v2 = self.vertices[5].fc_vertex.toShape().Point - self.vertices[1].fc_vertex.toShape().Point
+            v0 = vertices[2].fc_vertex.toShape().Point - vertices[1].fc_vertex.toShape().Point
+            v1 = vertices[0].fc_vertex.toShape().Point - vertices[1].fc_vertex.toShape().Point
+            v2 = vertices[5].fc_vertex.toShape().Point - vertices[1].fc_vertex.toShape().Point
 
             v2_ref = v0.normalize().cross(v1.normalize()).normalize()
 
             if np.allclose(v2_ref, v2.normalize()):
-                corrected_vertices = np.array(self.vertices)[np.array([1, 2, 3, 0, 5, 6, 7, 4])].tolist()
+                corrected_vertices = np.array(vertices)[np.array([1, 2, 3, 0, 5, 6, 7, 4])].tolist()
             elif np.allclose(v2_ref, -v2.normalize()):
-                corrected_vertices = np.array(self.vertices)[np.array([5, 6, 7, 4, 1, 2, 3, 0])].tolist()
+                corrected_vertices = np.array(vertices)[np.array([5, 6, 7, 4, 1, 2, 3, 0])].tolist()
             else:
                 if abs(angle_between_vectors(v2_ref, v2, v0)) < 90:
-                    corrected_vertices = np.array(self.vertices)[np.array([1, 2, 3, 0, 5, 6, 7, 4])].tolist()
+                    corrected_vertices = np.array(vertices)[np.array([1, 2, 3, 0, 5, 6, 7, 4])].tolist()
                 else:
-                    corrected_vertices = np.array(self.vertices)[np.array([5, 6, 7, 4, 1, 2, 3, 0])].tolist()
+                    corrected_vertices = np.array(vertices)[np.array([5, 6, 7, 4, 1, 2, 3, 0])].tolist()
 
         else:
-            v0 = self.vertices[1].fc_vertex.toShape().Point - self.vertices[0].fc_vertex.toShape().Point
-            v1 = self.vertices[3].fc_vertex.toShape().Point - self.vertices[0].fc_vertex.toShape().Point
-            v2 = self.vertices[4].fc_vertex.toShape().Point - self.vertices[0].fc_vertex.toShape().Point
+            v0 = vertices[1].fc_vertex.toShape().Point - vertices[0].fc_vertex.toShape().Point
+            v1 = vertices[3].fc_vertex.toShape().Point - vertices[0].fc_vertex.toShape().Point
+            v2 = vertices[4].fc_vertex.toShape().Point - vertices[0].fc_vertex.toShape().Point
 
             try:
                 v2_ref = v0.normalize().cross(v1.normalize()).normalize()
@@ -1305,21 +1843,21 @@ class Block(object, metaclass=BlockMetaMock):
                 raise e
 
             if np.allclose(v2_ref, v2.normalize()):
-                corrected_vertices = self.vertices
+                corrected_vertices = vertices
             elif np.allclose(v2_ref, -v2.normalize()):
-                corrected_vertices = [*self.vertices[4:], *self.vertices[0:4]]
+                corrected_vertices = [*vertices[4:], *vertices[0:4]]
             else:
                 if abs(angle_between_vectors(v2_ref, v2, v0)) < 90:
-                    corrected_vertices = self.vertices
+                    corrected_vertices = vertices
                 else:
-                    corrected_vertices = [*self.vertices[4:], *self.vertices[0:4]]
+                    corrected_vertices = [*vertices[4:], *vertices[0:4]]
 
         if self.cell_zone is not None:
             cell_zone = self.cell_zone.txt_id
         else:
             cell_zone = None
 
-        return f"hex ({' '.join(['v' + str(x.id) for x in corrected_vertices])}) {cell_zone} " \
+        return f"hex ({' '.join([x.txt_id for x in corrected_vertices])}) {cell_zone} " \
                f"({self.num_cells[0]} {self.num_cells[1]} {self.num_cells[2]}) " \
                f"simpleGrading ({self.grading[0]} {self.grading[1]} {self.grading[2]})" \
                f"// block {self.id}"
@@ -1334,12 +1872,20 @@ class Block(object, metaclass=BlockMetaMock):
             self._face0.blocks.add(self)
         return self._face0
 
+    @face0.setter
+    def face0(self, value):
+        self._face0 = value
+
     @property
     def face1(self):
         if self._face1 is None:
             self._face1 = BlockMeshFace(vertices=[self.vertices[x] for x in Block.face_map['outlet']])
             self._face1.blocks.add(self)
         return self._face1
+
+    @face1.setter
+    def face1(self, value):
+        self._face1 = value
 
     @property
     def face2(self):
@@ -1354,6 +1900,10 @@ class Block(object, metaclass=BlockMetaMock):
             self._face2.blocks.add(self)
         return self._face2
 
+    @face2.setter
+    def face2(self, value):
+        self._face2 = value
+
     @property
     def face3(self):
         if self._face3 is None:
@@ -1366,6 +1916,10 @@ class Block(object, metaclass=BlockMetaMock):
                                         extruded=extruded)
             self._face3.blocks.add(self)
         return self._face3
+
+    @face3.setter
+    def face3(self, value):
+        self._face3 = value
 
     @property
     def face4(self):
@@ -1380,6 +1934,10 @@ class Block(object, metaclass=BlockMetaMock):
             self._face4.blocks.add(self)
         return self._face4
 
+    @face4.setter
+    def face4(self, value):
+        self._face4 = value
+
     @property
     def face5(self):
         if self._face5 is None:
@@ -1393,9 +1951,32 @@ class Block(object, metaclass=BlockMetaMock):
             self._face5.blocks.add(self)
         return self._face5
 
+    @face5.setter
+    def face5(self, value):
+        self._face5 = value
+
     @property
     def faces(self):
         return [self.face0, self.face1, self.face2, self.face3, self.face4, self.face5]
+
+    @faces.setter
+    def faces(self, value):
+
+        if isinstance(value, list):
+            if value.__len__() != 6:
+                raise IndexError('Expected 6 faces')
+        elif isinstance(value, np.ndarray):
+            if value.shape.__len__() != 1:
+                raise IndexError('Expected 6 faces')
+            if value.shape[0] != 6:
+                raise IndexError('Expected 6 faces')
+
+        self._face0 = value[0]
+        self._face1 = value[1]
+        self._face2 = value[2]
+        self._face3 = value[3]
+        self._face4 = value[4]
+        self._face5 = value[5]
 
     @property
     def edge0(self):
@@ -1576,6 +2157,40 @@ class Block(object, metaclass=BlockMetaMock):
             self._parallel_edges_sets = self.get_parallel_edges_sets()
         return self._parallel_edges_sets
 
+    @property
+    def merge_patch_pairs(self):
+        return self._merge_patch_pairs
+
+    @merge_patch_pairs.setter
+    def merge_patch_pairs(self, value):
+        self._merge_patch_pairs = value
+
+        vertices = copy.copy(self.vertices)
+
+        if self._merge_patch_pairs:
+            for face_id in self._merge_patch_pairs:
+                duplicate_vertex_ids = np.array(list(self.face_map.values())[face_id])
+                duplicated_vertices = [x.duplicate() for x in self.vertices[duplicate_vertex_ids]]
+
+                vertices[duplicate_vertex_ids] = duplicated_vertices
+
+            duplicated_block = Block(vertices=vertices,
+                                     name=f'Duplicated Block ({self.id})',
+                                     duplicate=True,
+                                     extruded=self.extruded,
+                                     edge=self.edge,
+                                     cell_zone=self.cell_zone,
+                                     non_regular=self.non_regular)
+
+            for face_id in self._merge_patch_pairs:
+                patch_pair = PatchPair(surface=self.faces[face_id])
+                patch_pair.add_patch(duplicated_block.faces[face_id])
+                for adj_face_id in self.face_adj[face_id]:
+                    patch_pair = PatchPair(surface=self.faces[adj_face_id])
+                    patch_pair.add_patch(duplicated_block.faces[adj_face_id])
+
+            self.duplicated_block = duplicated_block
+
     # @property
     # def edge(self):
     #     if self._edge is None:
@@ -1661,12 +2276,13 @@ class Block(object, metaclass=BlockMetaMock):
 
 
 class CellZone(object, metaclass=CellZoneMetaMock):
-    id_iter = itertools.count()
+    # id_iter = itertools.count()
 
     def __init__(self, *args, **kwargs):
         self._name = None
         self.name = kwargs.get('name', None)
         self.id = next(CellZone.id_iter)
+        self.dict_id = next(CellZone.dict_id_iter)
         self.material = kwargs.get('material', None)
         self.boundaries = kwargs.get('boundaries', [])
         self.case = kwargs.get('case', None)
@@ -1693,10 +2309,10 @@ class CellZone(object, metaclass=CellZoneMetaMock):
 
     @property
     def txt_id(self):
-        if isinstance(self.id, uuid.UUID):
-            return 'a' + str(self.id.hex)
+        if isinstance(self.dict_id, uuid.UUID):
+            return 'a' + str(self.dict_id.hex)
         else:
-            return 'a' + str(self.id)
+            return 'a' + str(self.dict_id)
 
     def init_directories(self, case_dir):
         os.makedirs(os.path.join(case_dir, 'constant', str(self.txt_id)), exist_ok=True)
@@ -1913,6 +2529,9 @@ class BlockMesh(object):
         self._fvschemes = None
         self._fvsolution = None
 
+        self.blocks = kwargs.get('blocks', None)
+        self.mesh = kwargs.get('mesh', None)
+
     @property
     def id(self):
         return self._id
@@ -2024,12 +2643,29 @@ class BlockMesh(object):
         with open(os.path.join(self.case_dir, 'system', "fvSolution"), "w") as f:
             f.write(self.fvsolution)
 
-    @staticmethod
-    def create_block_mesh_dict():
+    def create_block_mesh_dict(self):
 
-        # contacts = CompBlock.search_merge_patch_pairs()
-        Block.update_parallel_edges()
-        ParallelEdgesSet.merge_sets()
+        if self.mesh is not None:
+            self.mesh.activate()
+            vertices = self.mesh.vertices.values()
+            edges = self.mesh.edges.values()
+            blocks = self.mesh.blocks
+            boundaries = self.mesh.boundaries
+            patch_pairs = self.mesh.patch_pairs
+            pe_sets = set()
+            _ = [pe_sets.update(x.parallel_edges_sets) for x in blocks]
+
+        else:
+            vertices = VertexMetaMock.instances
+            edges = EdgeMetaMock.instances
+            blocks = Block.instances
+            pe_sets = ParallelEdgesSet.instances
+            boundaries = BlockMeshBoundary.instances
+            patch_pairs =PatchPair.instances
+
+            # contacts = CompBlock.search_merge_patch_pairs()
+        Block.update_parallel_edges(blocks=blocks)
+        ParallelEdgesSet.merge_sets(pe_sets=pe_sets)
 
         # export_objects([FCPart.Compound([x.fc_edge for x in y.edges]) for y in ParallelEdgesSet.instances],
         #                '/tmp/parallel_edges.FCStd')
@@ -2038,21 +2674,22 @@ class BlockMesh(object):
 
         template = pkg_resources.read_text(msh_resources, 'block_mesh_dict')
 
-        vertices_entry = BlockMeshVertex.block_mesh_entry()
+        vertices_entry = BlockMeshVertex.block_mesh_entry(vertices=vertices)
         template = template.replace('<vertices>', vertices_entry)
 
-        edges_entry = BlockMeshEdge.block_mesh_entry()
+        edges_entry = BlockMeshEdge.block_mesh_entry(edges=edges)
         template = template.replace('<edges>', edges_entry)
 
-        block_entry = Block.block_mesh_entry()
+        block_entry = Block.block_mesh_entry(blocks=blocks)
         template = template.replace('<blocks>', block_entry)
 
-        boundary_entry = BlockMeshBoundary.block_mesh_entry()
+        boundary_entry = BlockMeshBoundary.block_mesh_entry(boundaries=boundaries)
         template = template.replace('<boundary>', boundary_entry)
 
         template = template.replace('<faces>', '')
 
-        template = template.replace('<merge_patch_pairs>', '')
+        merge_patch_pairs_entry = PatchPair.block_mesh_entry(patch_pairs=patch_pairs)
+        template = template.replace('<merge_patch_pairs>', merge_patch_pairs_entry)
 
         # export_objects([Block.instances[15].fc_solid, Block.instances[1148].fc_solid], '/tmp/error_blocks.FCStd')
 
@@ -2102,6 +2739,90 @@ class BlockMesh(object):
         os.remove(bmd_filename) if os.path.exists(bmd_filename) else None
 
         self.write_block_mesh_dict()
+
+    def create_block_obj(self):
+        logger.info(f'Exporting blockTopology....')
+        res = subprocess.run(["/bin/bash", "-i", "-c", "blockMesh -blockTopology -noFunctionObjects -noClean"],
+                             capture_output=True,
+                             cwd=self.case_dir,
+                             user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            logger.info(f"Successfully exported blockTopology: \n\n {output}")
+        else:
+            logger.error(f"{res.stderr.decode('ascii')}")
+            raise Exception(f"Error exporting blockTopology:\n{res.stderr.decode('ascii')}")
+
+    def obj_to_vtk(self):
+        logger.info(f'Creating blockTopology vtk....')
+        res = subprocess.run(["/bin/bash", "-i", "-c", "objToVTK blockTopology.obj blockTopology.vtk"],
+                             capture_output=True,
+                             cwd=self.case_dir,
+                             user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            logger.info(f"Successfully created blockTopology vtk: \n\n {output}")
+        else:
+            logger.error(f"{res.stderr.decode('ascii')}")
+            raise Exception(f"Error blockTopology vtk:\n{res.stderr.decode('ascii')}")
+
+    def run_parafoam(self, case_dir=None):
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        logger.info(f'Running paraFoam initialization....')
+        res = subprocess.run(["/bin/bash", "-i", "-c", "paraFoam -touchAll"],
+                             capture_output=True,
+                             cwd=case_dir,
+                             user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            logger.info(f"Successfully ran paraFoam initialization \n\n{output}")
+        else:
+            logger.error(f"{res.stderr.decode('ascii')}")
+        return True
+
+    def run_block_mesh(self, case_dir=None, retry=False, export_block_topology=False, run_parafoam=False):
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        if export_block_topology:
+            self.create_block_obj()
+            self.obj_to_vtk()
+
+        logger.info(f'Generating mesh....')
+        res = subprocess.run(["/bin/bash", "-i", "-c", "blockMesh -noFunctionObjects 2>&1 | tee blockMesh.log"],
+                             capture_output=True,
+                             cwd=case_dir,
+                             user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            if output.find('FOAM FATAL ERROR') != -1:
+                logger.error(f'Error Creating block mesh:\n\n{output}')
+                if retry:
+                    if output.find('Inconsistent number of faces') != -1:
+                        items = findall("Inconsistent number of faces.*$", output, MULTILINE)
+                        inconsistent_blocks = [int(x) for x in findall(r'\d+', items[0])]
+                        self.fix_inconsistent_block_faces(inconsistent_blocks)
+                        self.run_block_mesh(case_dir=case_dir, retry=False)
+                else:
+                    raise Exception(f'Error Creating block mesh:\n\n{output}')
+
+            if output.find('FOAM FATAL IO ERROR') != -1:
+                logger.error(f'Error Creating block mesh:\n\n{output}')
+                raise Exception(f'Error Creating block mesh:\n\n{output}')
+
+            logger.info(f"Successfully created block mesh: \n\n {output[output.find('Mesh Information'):]}")
+
+            if run_parafoam:
+                self.run_parafoam(case_dir=case_dir)
+
+        else:
+            logger.error(f"{res.stderr.decode('ascii')}")
+            raise Exception(f"Error creating block Mesh:\n{res.stderr.decode('ascii')}")
+        return True
 
 
 # def get_position(vertex: FCPart.Vertex):

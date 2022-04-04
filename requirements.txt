@@ -11,8 +11,6 @@ trimesh
 gmsh==4.9.3
 meshio
 PyFoam
-pyobb
-shapely
 scipy
 tqdm
 pandas

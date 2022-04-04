@@ -9,10 +9,9 @@ from src.htc_calculator import config
 
 config.n_proc = 8
 
-
 pipe_section.materials = [water, aluminium]
-pipe_section.cell_size = [None, None, 25]
-pipe_section.n_cell = [15, 15, None]
+pipe_section.cell_size = [None, None, 100]
+pipe_section.n_cell = [5, 5, None]
 
 # vertices = np.array([[0, 0, 0],
 #                      [5000, 0, 0],
@@ -104,7 +103,7 @@ my_bc = TabsBC(inlet_volume_flow=4.1666e-5,
 case = OFCase(reference_face=tabs1,
               bc=my_bc,
               n_proc=12)
-case.run()
+case.run_with_seperate_meshes()
 
 #
 # tabs1.generate_reference_geometry()

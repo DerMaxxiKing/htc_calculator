@@ -7,7 +7,7 @@ from re import findall, MULTILINE
 
 from ..logger import logger
 from ..meshing.block_mesh import BlockMesh, inlet_patch, outlet_patch, wall_patch, pipe_wall_patch, top_side_patch, \
-    bottom_side_patch, CellZone, BlockMeshBoundary
+    bottom_side_patch, CellZone, BlockMeshBoundary, Mesh
 from ..construction import write_region_properties, Fluid, Solid
 from .boundary_conditions.user_bcs import SolidFluidInterface, FluidSolidInterface
 from .. import config
@@ -235,8 +235,7 @@ class OFCase(object):
 
     def run_block_mesh(self, retry=False):
         logger.info(f'Generating mesh....')
-        time.sleep(0.5)
-        res = subprocess.run(["/bin/bash", "-i", "-c", "blockMesh 2>&1 | tee blockMesh.log"],
+        res = subprocess.run(["/bin/bash", "-i", "-c", "blockMesh -noFunctionObjects 2>&1 | tee blockMesh.log"],
                              capture_output=True,
                              cwd=self.case_dir,
                              user='root')
@@ -253,11 +252,19 @@ class OFCase(object):
                 else:
                     raise Exception(f'Error Creating block mesh:\n\n{output}')
             logger.info(f"Successfully created block mesh: \n\n {output[output.find('Mesh Information'):]}")
+            res = subprocess.run(["/bin/bash", "-i", "-c", "blockMesh - blockTopology"],
+                                 capture_output=True,
+                                 cwd=self.case_dir,
+                                 user='root')
+
+            res = subprocess.run(["/bin/bash", "-i", "-c", "objToVTK blockTopology.obj blockTopology.vtk"],
+                                 capture_output=True,
+                                 cwd=self.case_dir,
+                                 user='root')
+
         else:
             logger.error(f"{res.stderr.decode('ascii')}")
             raise Exception(f"Error creating block Mesh:\n{res.stderr.decode('ascii')}")
-
-        time.sleep(0.5)
         return True
 
     def run_split_mesh_regions(self):
@@ -341,7 +348,8 @@ class OFCase(object):
         # write region properties:
         write_region_properties(comp_blocks.cell_zones, self.case_dir)
 
-        self.run_block_mesh(retry=True)
+        # self.run_block_mesh(retry=True)
+        self.block_mesh.run_block_mesh(case_dir=self.case_dir)
         self.run_split_mesh_regions()
 
         for cell_zone in comp_blocks.cell_zones:
@@ -390,3 +398,25 @@ class OFCase(object):
         self.run_decompose_par()
 
         logger.debug('bla bla')
+
+    def run_with_seperate_meshes(self):
+        _ = self.reference_face.pipe_comp_blocks
+        _ = self.reference_face.free_comp_blocks
+        _ = self.reference_face.extruded_comp_blocks
+        comp_blocks = self.reference_face.comp_blocks
+
+        self.reference_face.update_cell_zone()
+        self.reference_face.update_boundary_conditions()
+
+        for key, mesh in Mesh.instances.items():
+            if 0 in [mesh.vertices.__len__(), mesh.blocks.__len__()]:
+                continue
+
+            mesh.activate()
+            block_mesh = BlockMesh(name='Block Mesh ' + mesh.name,
+                                   case_dir=os.path.join(self.default_path, mesh.txt_id),
+                                   mesh=mesh)
+            block_mesh.init_case()
+            block_mesh.run_block_mesh(run_parafoam=True)
+
+        print('done')

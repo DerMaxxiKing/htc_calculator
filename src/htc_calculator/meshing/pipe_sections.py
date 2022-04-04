@@ -39,6 +39,7 @@ class PipeSection(object):
 
         self.top_side = kwargs.get('top_side', dict())
         self.bottom_side = kwargs.get('bottom_side', dict())
+        self.merge_patch_pairs = kwargs.get('merge_patch_pairs', [{}, {}])
 
     @property
     def materials(self):
@@ -75,10 +76,12 @@ class PipeSection(object):
             block_vertex_indices = [*self.vertex_indices[0], *self.vertex_indices[1]]
             block_cell_zones = [*self.block_cell_zones[0], *self.block_cell_zones[1]]
             block_edge_indices = [*self.edge_indices[0], *self.edge_indices[1]]
+            merge_patch_pairs = self.merge_patch_pairs[0] | self.merge_patch_pairs[1]
         else:
             block_vertex_indices = self.vertex_indices[0]
             block_cell_zones = self.block_cell_zones[0]
             block_edge_indices = self.edge_indices[0]
+            merge_patch_pairs = self.merge_patch_pairs[0]
 
         blocks = []
         for i in range(block_vertex_indices.__len__()):
@@ -132,7 +135,7 @@ class PipeSection(object):
                               grading=self.grading[i],
                               cell_zone=cell_zone,
                               extruded=True,
-                              check_merge_patch_pairs=False,
+                              merge_patch_pairs=merge_patch_pairs.get(i, False),
                               pipe_layer_top=pipe_layer_top,
                               pipe_layer_bottom=pipe_layer_bottom,
                               pipe_layer_extrude_top=pipe_layer_extrude_top,
