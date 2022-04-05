@@ -399,7 +399,7 @@ class OFCase(object):
 
         logger.debug('bla bla')
 
-    def run_with_seperate_meshes(self):
+    def run_with_separate_meshes(self):
         _ = self.reference_face.pipe_comp_blocks
         _ = self.reference_face.free_comp_blocks
         _ = self.reference_face.extruded_comp_blocks

@@ -103,7 +103,7 @@ my_bc = TabsBC(inlet_volume_flow=4.1666e-5,
 case = OFCase(reference_face=tabs1,
               bc=my_bc,
               n_proc=12)
-case.run_with_seperate_meshes()
+case.run_with_separate_meshes()
 
 #
 # tabs1.generate_reference_geometry()
