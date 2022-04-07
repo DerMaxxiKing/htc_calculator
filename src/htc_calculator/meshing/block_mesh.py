@@ -119,11 +119,15 @@ class Mesh(object, metaclass=MeshMetaMock):
     def add_mesh_contact(self, face1, face2):
         if face1.mesh is self:
             if face2.mesh.id not in self.mesh_contacts.keys():
-                self.mesh_contacts[face2.mesh.id] = {face1, face2}
+                self.mesh_contacts[face2.mesh.id] = [(face1, face2)]
+            else:
+                self.mesh_contacts[face2.mesh.id].append((face1, face2))
 
         elif face2.mesh is self:
             if face2.mesh.id not in self.mesh_contacts.keys():
-                self.mesh_contacts[face2.mesh.id] = {face2, face1}
+                self.mesh_contacts[face1.mesh.id] = [(face2, face1)]
+            else:
+                self.mesh_contacts[face1.mesh.id].append((face2, face1))
 
     def activate(self):
         VertexMetaMock.current_mesh = self
@@ -142,6 +146,54 @@ class Mesh(object, metaclass=MeshMetaMock):
             return 'mesh_' + str(self.id.hex)
         else:
             return str(self.id)
+
+    @property
+    def mesh_contact_dict_entry(self):
+
+        dict_entries = []
+
+        for key, contacts in self.mesh_contacts.items():
+
+            faces_entries = []
+            for contact in contacts:
+                faces_entries.append(f"\t\t\t({' '.join([x.txt_id for x in contact[0].vertices])})")
+
+            faces_entries = '\n'.join(faces_entries)
+
+            entry = f"\tmesh_{key.hex}\n" \
+                    f"\t{'{'}\n" \
+                    f"\t\ttype patch;\n" \
+                    f"\t\tfaces\n" \
+                    f"\t\t(\n" \
+                    f"{faces_entries}\n" \
+                    f"\t\t);\n" \
+                    f"\t{'}'}"
+            dict_entries.append(entry)
+
+        return dict_entries
+
+        #
+        #     for contact in other_mesh:
+        #
+        #
+        #
+        #         dict_entries.append(f"\tcontact_face_{contact[0].txt_id}\n"
+        #                             f"\t{'{'}\n"
+        #                             f"\t\ttype patch;\n"
+        #                             f"\t\tfaces\n"
+        #                             f"\t\t(\n"
+        #                             f"\t\t\t({' '.join([x.txt_id for x in contact[0].vertices])})\n"
+        #                             f"\t\t);\n"
+        #                             f"\t{'}'}")
+        #
+        # return dict_entries
+
+    def __repr__(self):
+        return f'Mesh {self.id} (name={self.name}, verts: {self.vertices.__len__()} ' \
+               f'edges: {self.edges.__len__()} ' \
+               f'faces: {self.faces.__len__()} ' \
+               f'blocks: {self.blocks.__len__()} ' \
+               f'boundaries: {self.boundaries.__len__()} )'
 
 
 default_mesh = Mesh()
@@ -429,8 +481,8 @@ class FaceMetaMock(type):
             in_mesh_face = BlockMeshFace(**init_dict)
 
             if merge_meshes:
-                _ = MeshInterface(faces1=face,
-                                  faces2=in_mesh_face)
+                mesh.add_mesh_contact(in_mesh_face, face)
+                face.mesh.add_mesh_contact(face, in_mesh_face)
 
         return in_mesh_face
 
@@ -1034,21 +1086,27 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
     # id_iter = itertools.count()
 
     @classmethod
-    def block_mesh_entry(cls, boundaries=None):
+    def block_mesh_entry(cls, boundaries=None, mesh=None):
         # boundary_entries = [None] * cls.instances.values().__len__()
 
         if boundaries is None:
             boundaries = cls.instances.values()
 
+        if mesh is None:
+            mesh = cls.current_mesh
+
         boundary_entries = [x.dict_entry for x in boundaries if x.dict_entry is not None]
+
         merge_patch_entries = [x.boundary_dict_entry for x in PatchPair.instances.values()
                                if x.boundary_dict_entry is not None]
+
+        mesh_contact_entries = mesh.mesh_contact_dict_entry
 
         # for i, boundary in enumerate(BoundaryMetaMock.instances.values()):
         #     entry = boundary.dict_entry
         #     if entry is not None:
         #         boundary_entries[i] = '\t' + boundary.dict_entry
-        return f'boundary\n(\n' + "\n".join([*boundary_entries, *merge_patch_entries]) + '\n);\n'
+        return f'boundary\n(\n' + "\n".join([*boundary_entries, *merge_patch_entries, *mesh_contact_entries]) + '\n);\n'
 
     def __init__(self, *args, **kwargs):
 
@@ -2930,6 +2988,60 @@ class BlockMesh(object):
         else:
             logger.error(f"{res.stderr.decode('ascii')}")
         return True
+
+    def merge_mesh(self, block_mesh, case_dir=None, other_case_dir=None, overwrite=True):
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        if other_case_dir is None:
+            other_case_dir = block_mesh.case_dir
+
+        if overwrite:
+            overwrite_txt = ' -overwrite'
+        else:
+            overwrite_txt = ''
+
+        logger.info(f'Merging meshes {self} and {block_mesh}')
+
+        res = subprocess.run(["/bin/bash", "-i", "-c", f"mergeMeshes {case_dir} {other_case_dir}{overwrite_txt} -noFunctionObjects"],
+                             capture_output=True,
+                             cwd=case_dir,
+                             user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            logger.info(f"Successfully merged meshes \n\n{output}")
+        else:
+            logger.error(f"Error Merging meshes:\n{res.stderr.decode('ascii')}")
+        return True
+
+    def stitch_meshes(self, meshes):
+
+        logger.info(f'Stitching meshes....')
+
+        for mesh in meshes:
+            if mesh is self.mesh:
+                continue
+
+            logger.info()
+
+            if mesh.id in self.mesh.mesh_contacts.keys():
+                patch1 = 'mesh_' + str(self.mesh.id.hex)
+                patch2 = 'mesh_' + str(mesh.id.hex)
+
+                res = subprocess.run(["/bin/bash", "-i", "-c",
+                                      f"stitchMesh {patch1} {patch2} -noFunctionObjects"],
+                                     capture_output=True,
+                                     cwd=self.case_dir,
+                                     user='root')
+                if res.returncode == 0:
+                    output = res.stdout.decode('ascii')
+                    logger.info(f"Successfully merged meshes \n\n{output}")
+                else:
+                    logger.error(f"Error Merging meshes:\n{res.stderr.decode('ascii')}")
+                return True
+
+        pass
 
     def run_block_mesh(self, case_dir=None, retry=False, export_block_topology=False, run_parafoam=False):
 

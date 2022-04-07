@@ -408,6 +408,7 @@ class OFCase(object):
         self.reference_face.update_cell_zone()
         self.reference_face.update_boundary_conditions()
 
+        block_meshes = []
         for key, mesh in Mesh.instances.items():
             if 0 in [mesh.vertices.__len__(), mesh.blocks.__len__()]:
                 continue
@@ -416,6 +417,7 @@ class OFCase(object):
             block_mesh = BlockMesh(name='Block Mesh ' + mesh.name,
                                    case_dir=os.path.join(self.default_path, mesh.txt_id),
                                    mesh=mesh)
+            block_meshes.append(block_mesh)
             block_mesh.init_case()
             block_mesh.run_block_mesh(run_parafoam=True)
 

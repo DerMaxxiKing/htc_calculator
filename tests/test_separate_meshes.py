@@ -56,9 +56,11 @@ block4 = Block(vertices=vertices[[5, 10, 11, 6, 13, 16, 17, 14]],
 mesh2.activate()
 
 block1.face2.extrude(dist=-1)
+block3.face2.extrude(dist=1)
 
 default_path = '/tmp'
 
+block_meshes = []
 for mesh in [mesh1, mesh2]:
 
     if 0 in [mesh.vertices.__len__(), mesh.blocks.__len__()]:
@@ -68,7 +70,13 @@ for mesh in [mesh1, mesh2]:
     block_mesh = BlockMesh(name='Block Mesh ' + mesh.name,
                            case_dir=os.path.join(default_path, mesh.txt_id),
                            mesh=mesh)
+    block_meshes.append(block_mesh)
     block_mesh.init_case()
     block_mesh.run_block_mesh(run_parafoam=True)
+
+for mesh in block_meshes[1:]:
+    block_meshes[0].merge_mesh(mesh)
+
+block_meshes[0].stitch_meshes(block_meshes[1:])
 
 print('done')
