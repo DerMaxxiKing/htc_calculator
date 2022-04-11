@@ -246,3 +246,28 @@ class InletOutlet(BoundaryCondition):
         template = template.replace('<value>', str(self.value))
         template = template.replace('<inlet_value>', str(self.inlet_value))
         return template
+
+
+class CyclicAMI(BoundaryCondition):
+
+    template = cleandoc("""
+        {
+            type            cyclicAMI;
+            value           <value>;
+        }
+        """)
+
+    def __init__(self, *args, **kwargs):
+        """
+        # https://www.openfoam.com/documentation/guides/latest/api/classFoam_1_1inletOutletFvPatchField.html
+        This boundary condition provides a generic outflow condition, with
+        specified inflow for the case of return flow.
+        :param args:
+        :param kwargs: inletValue	Inlet value for reverse flow	yes
+        """
+        BoundaryCondition.__init__(self, *args, **kwargs)
+
+    def generate_dict_entry(self, *args, **kwargs):
+        template = deepcopy(self.template)
+        template = template.replace('<value>', str(self.value))
+        return template

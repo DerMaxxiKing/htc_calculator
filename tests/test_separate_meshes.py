@@ -32,22 +32,27 @@ vertex_positions = np.array([[0, 0, 0],
 vertices = np.array([BlockMeshVertex(position=x) for x in vertex_positions])
 
 
-block1 = Block(vertices=vertices[0:8],
+block0 = Block(vertices=vertices[0:8],
                name=f'Block1',
                auto_cell_size=True,
                extruded=False)
 
-block2 = Block(vertices=vertices[[1, 8, 9, 2, 5, 10, 11, 6]],
+block1 = Block(vertices=vertices[[1, 8, 9, 2, 5, 10, 11, 6]],
                name=f'Block2',
                auto_cell_size=True,
                extruded=False)
 
-block3 = Block(vertices=vertices[[4, 5, 6, 7, 12, 13, 14, 15]],
+block2 = Block(vertices=vertices[[4, 5, 6, 7, 12, 13, 14, 15]],
                name=f'Block3',
                auto_cell_size=True,
                extruded=False)
 
-block4 = Block(vertices=vertices[[5, 10, 11, 6, 13, 16, 17, 14]],
+
+block4 = block2.extrude_face(face_id=1, dist=0.5)
+block5 = block4.extrude_face(face_id=2, dist=1)
+
+
+block3 = Block(vertices=vertices[[5, 10, 11, 6, 13, 16, 17, 14]],
                name=f'Block3',
                auto_cell_size=True,
                extruded=False)
@@ -55,8 +60,12 @@ block4 = Block(vertices=vertices[[5, 10, 11, 6, 13, 16, 17, 14]],
 
 mesh2.activate()
 
-block1.face2.extrude(dist=-1)
-block3.face2.extrude(dist=1)
+block6 = block0.extrude_face(face_id=2, dist=1)
+# block6 = block3.face2.extrude(dist=1)
+block7 = block2.extrude_face(face_id=2, dist=1)
+
+block6.num_cells = [10, 10, 10]
+block7.num_cells = [10, 10, 10]
 
 default_path = '/tmp'
 

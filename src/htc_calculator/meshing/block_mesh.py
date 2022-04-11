@@ -1,4 +1,5 @@
 import copy
+import posix
 import subprocess
 import os.path
 import uuid
@@ -92,6 +93,7 @@ class Mesh(object, metaclass=MeshMetaMock):
         self.parallel_edges = []
         self.faces = {}
         self.face_ids = {}
+        self.face_pos = {}
         self.patch_pairs = {}
         self.boundaries = {}
         self.blocks = []
@@ -119,15 +121,15 @@ class Mesh(object, metaclass=MeshMetaMock):
     def add_mesh_contact(self, face1, face2):
         if face1.mesh is self:
             if face2.mesh.id not in self.mesh_contacts.keys():
-                self.mesh_contacts[face2.mesh.id] = [(face1, face2)]
+                self.mesh_contacts[face2.mesh.id] = {(face1, face2)}
             else:
-                self.mesh_contacts[face2.mesh.id].append((face1, face2))
+                self.mesh_contacts[face2.mesh.id].add((face1, face2))
 
         elif face2.mesh is self:
             if face2.mesh.id not in self.mesh_contacts.keys():
-                self.mesh_contacts[face1.mesh.id] = [(face2, face1)]
+                self.mesh_contacts[face1.mesh.id] = {(face2, face1)}
             else:
-                self.mesh_contacts[face1.mesh.id].append((face2, face1))
+                self.mesh_contacts[face1.mesh.id].add((face2, face1))
 
     def activate(self):
         VertexMetaMock.current_mesh = self
@@ -439,6 +441,18 @@ class FaceMetaMock(type):
         #     logger.debug('Face already existing')
         return face
 
+    @classmethod
+    def get_face_by_vertex_positions(cls, vertices, mesh=None):
+
+        if mesh is None:
+            mesh = cls.current_mesh
+
+        key = tuple(sorted([tuple(x.position.tolist()) for x in vertices], key=lambda tup: (tup[1], tup[2])))
+        if key in mesh.face_pos.keys():
+            return mesh.face_pos[key]
+        else:
+            return None
+
     def __call__(cls, *args, **kwargs):
 
         mesh = kwargs.get('mesh', None)
@@ -455,6 +469,7 @@ class FaceMetaMock(type):
             mesh.faces[tuple(sorted(vertices))] = obj
             mesh.face_ids[obj.id] = obj
 
+            mesh.face_pos[tuple(sorted([tuple(x.position.tolist()) for x in vertices], key=lambda tup: (tup[1], tup[2])))] = obj
         return obj
 
     @property
@@ -1209,6 +1224,13 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         return f'Boundary {self.id} (name={self.name}, type={self.type}, faces={self.faces})'
 
 
+class CyclicAMI(BlockMeshBoundary):
+
+    def __init__(self, *args, **kwargs):
+        BlockMeshBoundary.__init__(self, *args, **kwargs)
+        self.neighbour_patch = kwargs.get('neighbour_patch', None)
+
+
 # Boundary conditions:
 # ---------------------------------------------------------------------------------------------------------------------
 
@@ -1560,6 +1582,7 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
 
         # create quad blocks:
 
+        new_block = None
         if vertices.__len__() == 4:
 
             new_block = Block(vertices=[*v_1, *v_2],
@@ -1581,6 +1604,24 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
                               non_regular=True,
                               mesh=mesh
                               )
+
+        if self.mesh is not mesh:
+
+            common_face_ids = set(mesh.face_pos.keys()).intersection(self.mesh.face_pos.keys())
+            for common_face_id in common_face_ids:
+                face1 = mesh.face_pos[common_face_id]
+                face2 = self.mesh.face_pos[common_face_id]
+
+                mesh.add_mesh_contact(face1, face2)
+                self.mesh.add_mesh_contact(face2, face1)
+
+            # for face in new_block.faces:
+            #     other_face = FaceMetaMock.get_face_by_vertex_positions(vertices=face.vertices, mesh=self.mesh)
+            #     if other_face is not None:
+            #         mesh.add_mesh_contact(other_face, face)
+            #         face.mesh.add_mesh_contact(face, other_face)
+
+                # set(mesh.face_pos.keys()).intersection(self.mesh.face_pos.keys())
 
         return new_block
 
@@ -2478,6 +2519,45 @@ class Block(object, metaclass=BlockMetaMock):
             parallel_edges_sets.append(ParallelEdgesSet.add_set(self.block_edges[p_edges]))
         return parallel_edges_sets
 
+    def get_face_outside_normal(self, face_id):
+        # https://stackoverflow.com/questions/57434507/determing-the-direction-of-face-normals-consistently
+
+        face_normal = self.faces[face_id].normal
+        face_center = self.faces[face_id].dirty_center
+        cube_center = self.dirty_center
+
+        if np.dot(face_normal, face_center - cube_center) >= 0.0:
+            return face_normal
+        else:
+            return -face_normal
+
+    def extrude_face(self,
+                     dist=1,
+                     face_id=None,
+                     face=None,
+                     direction=None,
+                     dist2=None,
+                     mesh=None,
+                     merge_meshes=True):
+
+        if face is None:
+            if face_id is not None:
+                face = self.faces[face_id]
+            else:
+                logger.error(f'Error extruding face of block {self}:\nEither face id or face must be given ')
+                raise Exception(f'Either face id or face must be given')
+        else:
+            # check if face is a block face:
+            if face not in self.faces:
+                block_faces = '\n'.join(self.faces)
+                raise Exception(f'Error extruding face of block {self}:\nFace {face} is not a face of the block.'
+                                f"Block faces are: {block_faces}")
+
+        if direction is None:
+            direction = self.get_face_outside_normal(face_id)
+
+        return face.extrude(dist, direction=direction, dist2=dist2, mesh=mesh, merge_meshes=merge_meshes)
+
 
 class CellZone(object, metaclass=CellZoneMetaMock):
     # id_iter = itertools.count()
@@ -3015,22 +3095,22 @@ class BlockMesh(object):
             logger.error(f"Error Merging meshes:\n{res.stderr.decode('ascii')}")
         return True
 
-    def stitch_meshes(self, meshes):
+    def stitch_meshes(self, block_meshes):
 
         logger.info(f'Stitching meshes....')
 
-        for mesh in meshes:
-            if mesh is self.mesh:
+        for block_mesh in block_meshes:
+            if block_mesh.mesh is self.mesh:
                 continue
 
-            logger.info()
-
-            if mesh.id in self.mesh.mesh_contacts.keys():
+            if block_mesh.mesh.id in self.mesh.mesh_contacts.keys():
                 patch1 = 'mesh_' + str(self.mesh.id.hex)
-                patch2 = 'mesh_' + str(mesh.id.hex)
+                patch2 = 'mesh_' + str(block_mesh.mesh.id.hex)
+
+                logger.info(f'Stitching mesh patches: {patch1} and {patch2}')
 
                 res = subprocess.run(["/bin/bash", "-i", "-c",
-                                      f"stitchMesh {patch1} {patch2} -noFunctionObjects"],
+                                      f"stitchMesh {patch1} {patch2} -partial -noFunctionObjects"],
                                      capture_output=True,
                                      cwd=self.case_dir,
                                      user='root')
@@ -3039,7 +3119,6 @@ class BlockMesh(object):
                     logger.info(f"Successfully merged meshes \n\n{output}")
                 else:
                     logger.error(f"Error Merging meshes:\n{res.stderr.decode('ascii')}")
-                return True
 
         pass
 

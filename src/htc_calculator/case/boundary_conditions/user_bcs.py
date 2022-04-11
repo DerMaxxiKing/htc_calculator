@@ -137,3 +137,6 @@ class SolidConvection(UserBC):
 
         self._t = ExternalWallHeatFluxTemperature(h=self.heat_transfer_coefficient,
                                                   t_a=self.ambient_temperature)
+
+
+class SolidCyclicAMI(UserBC):
