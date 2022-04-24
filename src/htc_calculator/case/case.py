@@ -1,3 +1,4 @@
+import copy
 import time
 import uuid
 import os
@@ -5,9 +6,10 @@ import stat
 import subprocess
 from re import findall, MULTILINE
 
+from ..config import work_dir
 from ..logger import logger
 from ..meshing.block_mesh import BlockMesh, inlet_patch, outlet_patch, wall_patch, pipe_wall_patch, top_side_patch, \
-    bottom_side_patch, CellZone, BlockMeshBoundary, Mesh
+    bottom_side_patch, CellZone, BlockMeshBoundary, Mesh, CreatePatchDict
 from ..construction import write_region_properties, Fluid, Solid
 from .boundary_conditions.user_bcs import SolidFluidInterface, FluidSolidInterface
 from .. import config
@@ -47,7 +49,7 @@ class TabsBC(object):
 
 class OFCase(object):
 
-    default_path = '/tmp/'
+    default_path = work_dir
 
     def __init__(self, *args, **kwargs):
 
@@ -73,6 +75,7 @@ class OFCase(object):
 
         self.case_dir = kwargs.get('case_dir', None)
         self.bc = kwargs.get('bc', None)
+        self.create_patch_dict = kwargs.get('create_patch_dict', CreatePatchDict(case_dir=self.case_dir))
 
         self.function_objects = FOMetaMock.instances
 
@@ -267,6 +270,24 @@ class OFCase(object):
             raise Exception(f"Error creating block Mesh:\n{res.stderr.decode('ascii')}")
         return True
 
+    def run_check_mesh(self):
+        logger.info(f'Checking mesh....')
+        res = subprocess.run(
+            ["/bin/bash", "-i", "-c", "checkMesh 2>&1 | tee checkMesh.log"],
+            capture_output=True,
+            cwd=self.case_dir,
+            user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            if output.find('FOAM FATAL ERROR') != -1:
+                logger.error(f'Error decomposePar:\n\n{output}')
+                raise Exception(f'Error decomposePar:\n\n{output}')
+            logger.info(f"Successfully ran checkMesh \n\n{output}")
+        else:
+            logger.error(f"{res.stderr.decode('ascii')}")
+
+        return True
+
     def run_split_mesh_regions(self):
         logger.info(f'Splitting Mesh Regions....')
         res = subprocess.run(
@@ -402,7 +423,8 @@ class OFCase(object):
     def run_with_separate_meshes(self):
         _ = self.reference_face.pipe_comp_blocks
         _ = self.reference_face.free_comp_blocks
-        _ = self.reference_face.extruded_comp_blocks
+        _ = self.reference_face.layer_meshes
+        # _ = self.reference_face.extruded_comp_blocks
         comp_blocks = self.reference_face.comp_blocks
 
         self.reference_face.update_cell_zone()

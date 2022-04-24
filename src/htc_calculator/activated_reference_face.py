@@ -1,3 +1,5 @@
+import copy
+import os
 import sys
 import numpy as np
 import pathlib
@@ -9,7 +11,7 @@ from .face import Face
 from .solid import Solid, PipeSolid
 from .meshing import block_mesh as imp_block_mesh
 from .meshing.block_mesh import create_blocks_from_2d_mesh, Mesh, BlockMesh, \
-    CompBlock, NoNormal, bottom_side_patch, top_side_patch, CellZone, wall_patch
+    CompBlock, NoNormal, bottom_side_patch, top_side_patch, CellZone, wall_patch, extrude_2d_mesh, Block, BlockMeshEdge
 from .logger import logger
 from .tools import export_objects, split_wire_by_projected_vertices
 from .case.case import OFCase
@@ -33,13 +35,17 @@ class ActivatedReferenceFace(ReferenceFace):
         self._pipe = None
         self._pipe_comp_blocks = None
         self._free_comp_blocks = None
+        self._layer_meshes = None
         self._extruded_comp_blocks = None
         self._comp_blocks = None
         self._case = None
         self._layer_interface_planes = None
 
-        self.pipe_mesh = Mesh(name='pipe_mesh')
-        self.construction_mesh = Mesh(name='construction_mesh')
+        self.pipe_mesh = BlockMesh(name='Block Mesh ' + 'pipe_layer_mesh',
+                                   mesh=Mesh(name='pipe_layer_mesh'))
+
+        self.construction_mesh = BlockMesh(name='Block Mesh ' + 'pipe_layer_free_mesh',
+                                           mesh=Mesh(name='pipe_layer_free_mesh'))
 
         self.case = kwargs.get('case', OFCase(reference_face=self))
         self.plain_reference_face_solid = ReferenceFace(*args, **kwargs)
@@ -129,6 +135,20 @@ class ActivatedReferenceFace(ReferenceFace):
                                                                 self.normal) for x in layer_interfaces])
         return self._layer_interface_planes
 
+    @property
+    def layer_meshes(self):
+        if self._layer_meshes is None:
+            self._layer_meshes = self.extrude_clean_layers()
+        return self._layer_meshes
+
+    @layer_meshes.setter
+    def layer_meshes(self, value):
+        self._layer_meshes = value
+
+    @property
+    def pipe_layer_thickness(self):
+        return 2 * (self.tube_diameter / 2 / np.sqrt(2) + self.tube_diameter / 4)
+
     def export_solid_pipe(self, filename):
         doc = App.newDocument()
         __o__ = doc.addObject("Part::Feature", f'pipe_solid')
@@ -156,7 +176,7 @@ class ActivatedReferenceFace(ReferenceFace):
 
     def create_o_grid_with_section(self):
 
-        self.pipe_mesh.activate()
+        self.pipe_mesh.mesh.activate()
 
         logger.info(f'Generation o-grid blocks for pipe...')
 
@@ -189,6 +209,19 @@ class ActivatedReferenceFace(ReferenceFace):
                                                         outlet=outlet)
             blocks.append(new_blocks)
 
+            if outer_pipe:
+
+                def get_side_faces(items):
+                    side_faces = []
+                    for block_id, face_ids in items.items():
+                        for face_id in face_ids:
+                            side_faces.append(new_blocks[block_id].faces[face_id])
+                    return side_faces
+
+                self.pipe_mesh.top_faces.extend(get_side_faces(self.pipe_section.top_side))
+                self.pipe_mesh.bottom_faces.extend(get_side_faces(self.pipe_section.bottom_side))
+                self.pipe_mesh.interfaces.extend(get_side_faces(self.pipe_section.interface_side))
+
         logger.info(f'Finished pipe o-grid block generation successfully\n\n')
         block_list = functools.reduce(operator.iconcat, blocks, [])
         pipe_comp_block = CompBlock(name='Pipe Blocks',
@@ -200,7 +233,7 @@ class ActivatedReferenceFace(ReferenceFace):
 
     def create_free_blocks(self):
 
-        self.construction_mesh.activate()
+        self.construction_mesh.mesh.activate()
 
         logger.info(f'Creating free block mesh for {self.name}, {self.id}')
 
@@ -230,12 +263,18 @@ class ActivatedReferenceFace(ReferenceFace):
 
         wire = FCPart.Wire(cutted_face.SubShapes[1].OuterWire)
         if not wire.isClosed():
-            return FCPart.Wire([*wire.OrderedEdges,
+            wire = FCPart.Wire([*wire.OrderedEdges,
                                 FCPart.LineSegment(wire.OrderedVertexes[-1].Point,
                                                    wire.OrderedVertexes[0].Point).toShape()])
 
-        quad_meshes = [Face(fc_face=x).create_hex_g_mesh(lc=9999999999) for x in [cutted_face.SubShapes[0],
-                                                                                  FCPart.Face(wire)]]
+        # add edges:
+        for edge in [*wire.Edges, *cutted_face.SubShapes[0].Edges]:
+            if type(edge.Curve) is FCPart.Arc:
+                BlockMeshEdge.from_fc_edge(fc_edge=edge,
+                                           mesh=self.construction_mesh.mesh)
+
+        quad_meshes = [Face(fc_face=x).create_hex_g_mesh_2(lc=9999999999) for x in [cutted_face.SubShapes[0],
+                                                                                    FCPart.Face(wire)]]
         free_blocks = create_blocks_from_2d_mesh(quad_meshes, self)
 
         for block in free_blocks:
@@ -250,6 +289,77 @@ class ActivatedReferenceFace(ReferenceFace):
         # export_objects([free_comp_block.fc_solid], '/tmp/free_comp_block.FCStd')
 
         return free_comp_block
+
+    def extrude_clean_layers(self):
+
+        layer_thicknesses = np.array([0, *[x.thickness for x in self.component_construction.layers]])
+        # layer_interface_planes = self.layer_interface_planes
+
+        # quad_mesh = self.quad_mesh
+
+        layer_meshes = []
+
+        new_blocks = []
+        offset0 = - self.component_construction.side_1_offset * self.layer_dir
+        layer_positions = np.cumsum(layer_thicknesses) + offset0
+
+        for i, layer_thickness in enumerate(layer_thicknesses[:-1]):
+
+            layer_mesh = Mesh(name=f'{self.component_construction.layers[i].name}_mesh')
+
+            if layer_positions[i] < self.tube_side_1_offset < layer_positions[i+1]:
+                block_mesh = BlockMesh(name='Block Mesh ' + layer_mesh.name,
+                                       mesh=layer_mesh)
+                self.layer_meshes.append(block_mesh)
+                layer_mesh.activate()
+
+                # extrude pipe layer to bottom of the material layer:
+                quad_mesh = copy.copy(self.quad_mesh)
+
+                dist0 = (-self.component_construction.side_1_offset +
+                         self.tube_side_1_offset - self.pipe_layer_thickness / 2) * self.layer_dir
+
+                quad_mesh.points = quad_mesh.points + dist0 * self.normal
+                dist = layer_positions[i] - dist0
+                layer_blocks = extrude_2d_mesh(quad_mesh,
+                                               distance=dist,
+                                               direction=self.normal * self.layer_dir)
+                new_blocks.extend(layer_blocks)
+
+                block_mesh.bottom_faces = [block.faces[1] for block in layer_blocks]
+
+                # extrude pipe layer to top of the material layer:
+                quad_mesh = copy.copy(self.quad_mesh)
+                dist0 = (-self.component_construction.side_1_offset +
+                         self.tube_side_1_offset + self.pipe_layer_thickness / 2) * self.layer_dir
+
+                quad_mesh.points = quad_mesh.points + dist0 * self.normal
+                dist = layer_positions[i+1] - dist0
+                layer_blocks = extrude_2d_mesh(quad_mesh,
+                                               distance=dist,
+                                               direction=self.normal)
+                new_blocks.extend(layer_blocks)
+                block_mesh.bottom_faces = [block.faces[1] for block in layer_blocks]
+
+            else:
+                block_mesh = BlockMesh(name='Block Mesh ' + layer_mesh.name,
+                                       mesh=layer_mesh)
+                self.layer_meshes.append(block_mesh)
+                layer_mesh.activate()
+
+                quad_mesh = copy.copy(self.quad_mesh)
+                quad_mesh.points = quad_mesh.points + offset0 + layer_positions[i] * self.normal * self.layer_dir
+                layer_blocks = extrude_2d_mesh(quad_mesh,
+                                               distance=layer_thickness,
+                                               direction=self.normal)
+                new_blocks.extend(layer_blocks)
+
+                block_mesh.bottom_faces = [block.faces[0] for block in layer_blocks]
+                block_mesh.top_faces = [block.faces[1] for block in layer_blocks]
+
+        # Block.save_fcstd(filename='/tmp/new_blocks.FCStd', blocks=new_blocks)
+
+        return layer_meshes
 
     def extrude_pipe_layer(self):
 

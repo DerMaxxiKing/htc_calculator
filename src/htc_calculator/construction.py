@@ -277,6 +277,7 @@ class Layer(object):
         self.material = kwargs.get('material', None)
         self.thickness = kwargs.get('thickness', None)
         self.solid = None
+        self.contains_pipe = kwargs.get('contains_pipe', False)
 
         self.initial_temperature = kwargs.get('initial_temperature', 293.15)
 

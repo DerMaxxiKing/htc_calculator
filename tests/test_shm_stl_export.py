@@ -6,6 +6,8 @@ from src.htc_calculator.meshing.buildin_pipe_sections.tube_with_wall_optimized i
 from src.htc_calculator import OFCase, TabsBC
 from src.htc_calculator import config
 
+from src.htc_calculator.logger import logger
+logger.setLevel('DEBUG')
 
 config.n_proc = 8
 
@@ -103,6 +105,9 @@ my_bc = TabsBC(inlet_volume_flow=4.1666e-5,
 case = OFCase(reference_face=tabs1,
               bc=my_bc,
               n_proc=12)
+
+tabs1.case = case
+
 case.run_with_separate_meshes()
 
 #

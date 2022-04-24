@@ -1,5 +1,6 @@
 import os
 import sys
+import itertools
 import uuid
 import tempfile
 import time
@@ -166,7 +167,71 @@ class Face(object):
                                           MaxLength=max_length)
         return mesh_shp
 
+    def create_hex_g_mesh_2(self, lc=999999):
+
+        if not self.fc_face.Wires[0].isClosed():
+            raise Exception(f'Error creating hex mesh:\nFace {self} is not closed!')
+
+        gmsh.initialize([])
+        gmsh.model.add(f'{self.txt_id}')
+
+        try:
+            geo = gmsh.model.geo
+            lc_p = lc
+            counter = itertools.count(start=1)
+            gm_vertices = [geo.addPoint(vertex.X, vertex.Y, vertex.Z, lc_p, next(counter)) for vertex in self.fc_face.Wires[0].OrderedVertexes]
+            gmsh.model.geo.synchronize()
+
+            edge_counter = itertools.count(start=1)
+            gm_edges = [geo.addLine(i+1, i+2, next(edge_counter)) for i in range(gm_vertices.__len__()-1)]
+            gm_edges.append(geo.addLine(gm_vertices[-1], 1, next(edge_counter)))
+            gmsh.model.geo.synchronize()
+
+            geo.addCurveLoop(gm_edges, 1)
+            gmsh.model.geo.synchronize()
+
+            geo.addPlaneSurface([1], 1)
+            gmsh.model.geo.synchronize()
+
+            gmsh.option.setNumber("General.Terminal", 0)
+            gmsh.option.setNumber("Mesh.MeshSizeMin", 1)
+            gmsh.option.setNumber("Mesh.MeshSizeMax", lc)
+
+            # Finally, while the default "Frontal-Delaunay" 2D meshing algorithm
+            # (Mesh.Algorithm = 6) usually leads to the highest quality meshes, the
+            # "Delaunay" algorithm (Mesh.Algorithm = 5) will handle complex mesh size fields
+            # better - in particular size fields with large element size gradients:
+            # gmsh.option.setNumber("Mesh.Algorithm", 5)
+
+            # gmsh.option.setNumber("Mesh.Algorithm", 8)
+            gmsh.option.setNumber("Mesh.RecombinationAlgorithm", 2)
+            gmsh.model.mesh.generate(2)
+            gmsh.model.mesh.optimize('Relocate2D')
+
+            # recombine to quad mesh
+            # https://gitlab.onelab.info/gmsh/gmsh/-/issues/784
+            gmsh.option.setNumber('General.Terminal', 0)
+            # gmsh.model.mesh.setRecombine(2, 1)
+            # gmsh.option.setNumber('SubdivisionAlgorithm ', 2)
+            gmsh.model.mesh.recombine()
+            # gmsh.model.mesh.recombine()
+            mesh = extract_to_meshio()
+            # mesh.write('/tmp/test.vtk')
+
+        except Exception as e:
+            logger.error(f'Error creating mesh for face {self.id}')
+            raise e
+        finally:
+            gmsh.finalize()
+
+        return mesh
+
     def create_hex_g_mesh(self, lc=999999):
+
+        logger.warn(f'create_hex_g_mesh is deprecated. Use create_hex_g_mesh_2')
+
+        if not self.fc_face.Wires[0].isClosed():
+            raise Exception(f'Error creating hex mesh:\nFace {self} is not closed!')
 
         gmsh.initialize([])
         gmsh.model.add(f'{self.txt_id}')
@@ -208,7 +273,12 @@ class Face(object):
             gmsh.model.geo.synchronize()
 
             ids = (np.array(range(edges.__len__())) + 1) * np.array(edge_orientations)
-            geo.addCurveLoop(ids, 1)
+            try:
+                geo.addCurveLoop(ids, 1)
+            except Exception as e:
+                if e.args[0] == 'Curve loop 1 is wrong':
+                    pass
+                raise e
             gmsh.model.geo.synchronize()
 
             geo.addPlaneSurface([1], 1)

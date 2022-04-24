@@ -2,6 +2,7 @@ import numpy as np
 import os
 from src.htc_calculator.meshing.block_mesh import BlockMeshVertex, Block, BlockMesh, Mesh
 from src.htc_calculator.case.utils import run_parafoam_touch_all
+from src.htc_calculator.case.case import CreatePatchDict
 
 
 mesh1 = Mesh(name='mesh 1')
@@ -80,12 +81,18 @@ for mesh in [mesh1, mesh2]:
                            case_dir=os.path.join(default_path, mesh.txt_id),
                            mesh=mesh)
     block_meshes.append(block_mesh)
+
+BlockMesh.add_mesh_contacts(block_meshes)
+
+for block_mesh in block_meshes:
     block_mesh.init_case()
     block_mesh.run_block_mesh(run_parafoam=True)
 
 for mesh in block_meshes[1:]:
     block_meshes[0].merge_mesh(mesh)
 
-block_meshes[0].stitch_meshes(block_meshes[1:])
+block_meshes[0].mesh
+
+# block_meshes[0].stitch_meshes(block_meshes[1:])
 
 print('done')

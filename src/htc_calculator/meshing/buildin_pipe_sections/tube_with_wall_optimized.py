@@ -207,6 +207,8 @@ grading = [[1, 1, 1],   # Block 0
 # define which faces are on top side and bottom side:
 top_side = {11: [3]}          # block id, face id
 bottom_side = {9: [3]}       # block id, face id
+interface_side = {10: [3],
+                  12: [3]}
 
 merge_patch_pairs = [{}, {}]
 
@@ -226,4 +228,5 @@ pipe_section = PipeSection(name='Plain Tube',
                            block_inlet_faces=block_inlet_faces,
                            block_outlet_faces=block_outlet_faces,
                            top_side=top_side,
-                           bottom_side=bottom_side)
+                           bottom_side=bottom_side,
+                           interface_side=interface_side)

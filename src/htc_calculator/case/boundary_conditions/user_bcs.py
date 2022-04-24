@@ -1,6 +1,6 @@
 from .epsilon import TurbulentMixingLengthDissipationRateInlet, EpsilonWallFunction
 from .k import TurbulentIntensityKineticEnergyInlet, KqRWallFunction
-from .base import Calculated, FixedValue, InletOutlet, ZeroGradient
+from .base import Calculated, FixedValue, InletOutlet, ZeroGradient, CyclicAMI
 from .p_rgh import FixedFluxPressure
 from .u import VolumeFlowRate, PressureInletOutletVelocity, NoSlip
 from .nut import NutkWallFunction
@@ -140,3 +140,23 @@ class SolidConvection(UserBC):
 
 
 class SolidCyclicAMI(UserBC):
+
+    def __init__(self, *args, **kwargs):
+        UserBC.__init__(self, *args, **kwargs)
+
+        self._t = CyclicAMI()
+
+
+class FluidCyclicAMI(UserBC):
+
+    def __init__(self, *args, **kwargs):
+        UserBC.__init__(self, *args, **kwargs)
+
+        self._alphat = CyclicAMI()
+        self._epsilon = CyclicAMI()
+        self._k = CyclicAMI()
+        self._nut = CyclicAMI()
+        self._p = CyclicAMI()
+        self._p_rgh = CyclicAMI()
+        self._t = CyclicAMI()
+        self._u = CyclicAMI()

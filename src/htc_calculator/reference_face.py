@@ -55,6 +55,7 @@ class ReferenceFace(object):
         self._points = kwargs.get('points', None)                         # list of fc vectors to point positions
         self._reference_wire = kwargs.get('reference_wire', None)         # fc wire of the reference face
         self._reference_face = kwargs.get('reference_face', None)         # fc reference face
+        self._quad_mesh = kwargs.get('quad_mesh', None)         # fc wire of the reference face
         self.layer_dir = kwargs.get('layer_dir', 1)                      # 1 if in normal direction, -1 if negative normal direction
 
         self.component_construction = kwargs.get('component_construction', None)
@@ -129,6 +130,12 @@ class ReferenceFace(object):
     @assembly.setter
     def assembly(self, value):
         self._assembly = value
+
+    @property
+    def quad_mesh(self):
+        if self._quad_mesh is None:
+            self._quad_mesh = self.generate_quad_mesh()
+        return self._quad_mesh
 
     def generate_reference_geometry(self):
 
@@ -434,6 +441,9 @@ class ReferenceFace(object):
         __o__.Shape = self.assembly.comp_solid
         doc.recompute()
         doc.saveCopy(filename)
+
+    def generate_quad_mesh(self):
+        return Face(fc_face=self.reference_face).create_hex_g_mesh_2(lc=9999999999)
 
     def generate_mesh_gmsh(self):
 

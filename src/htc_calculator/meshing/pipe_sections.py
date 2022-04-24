@@ -39,6 +39,7 @@ class PipeSection(object):
 
         self.top_side = kwargs.get('top_side', dict())
         self.bottom_side = kwargs.get('bottom_side', dict())
+        self.interface_side = kwargs.get('interface_side', dict())
         self.merge_patch_pairs = kwargs.get('merge_patch_pairs', [{}, {}])
 
     @property
@@ -140,6 +141,15 @@ class PipeSection(object):
                               pipe_layer_bottom=pipe_layer_bottom,
                               pipe_layer_extrude_top=pipe_layer_extrude_top,
                               pipe_layer_extrude_bottom=pipe_layer_extrude_bottom)
+            try:
+                export_objects([new_block.fc_solid], '/tmp/blocks.FCStd')
+            except Exception as e:
+                export_objects([x.fc_edge for x in new_block.face3.edges], '/tmp/face3_edges.FCStd')
+                export_objects([x.fc_edge for x in block_edges], '/tmp/init_block_edges.FCStd')
+                export_objects([new_block.face0.fc_face], '/tmp/face0.FCStd')
+                export_objects([x.fc_face for x in new_block.faces], '/tmp/faces.FCStd')
+                export_objects([x.fc_edge for x in new_block.block_edges], '/tmp/edges.FCStd')
+                raise e
 
             blocks.append(new_block)
 
