@@ -280,6 +280,7 @@ class Layer(object):
         self.contains_pipe = kwargs.get('contains_pipe', False)
 
         self.initial_temperature = kwargs.get('initial_temperature', 293.15)
+        self.meshes = kwargs.get('meshes', set())
 
     @property
     def txt_id(self):

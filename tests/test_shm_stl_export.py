@@ -7,7 +7,7 @@ from src.htc_calculator import OFCase, TabsBC
 from src.htc_calculator import config
 
 from src.htc_calculator.logger import logger
-logger.setLevel('DEBUG')
+logger.setLevel('INFO')
 
 config.n_proc = 8
 

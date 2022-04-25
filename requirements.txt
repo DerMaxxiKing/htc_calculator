@@ -8,7 +8,7 @@ numpy
 pyzmq
 colorlog
 trimesh
-gmsh==4.9.3
+gmsh
 meshio
 PyFoam
 scipy

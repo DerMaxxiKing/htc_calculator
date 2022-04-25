@@ -370,7 +370,7 @@ class PipeSolid(Solid):
         self._pipe_wire = value
 
     @property
-    def length(self):
+    def pipe_length(self):
         return self.pipe_wire.Length
 
     def generate_initial_pipe_wire(self):
@@ -630,7 +630,7 @@ class PipeSolid(Solid):
 
         for i, solid in enumerate(self.reference_face.assembly.solids):
 
-            logger.info(f'Updating layer solid {i} of {self.reference_face.assembly.solids.__len__()}: '
+            logger.info(f'Updating layer solid {i+1} of {self.reference_face.assembly.solids.__len__()}: '
                         f'{solid.name} {solid.id}')
 
             common = solid.fc_solid.Shape.common(pipe)
@@ -683,6 +683,14 @@ class PipeSolid(Solid):
         except Exception as e:
             print(e)
             raise e
+
+    def print_info(self):
+        print(f'\nPipe info:\n'
+              f'----------------------------------\n\n'
+              f'Tube diameter: {self.tube_diameter} mm\n'
+              f'Distance between tubes: {self.tube_distance} mm\n'
+              f'Bending radius: {self.bending_radius} mm\n'
+              f'Tube length: {self.pipe_length / 1000} m\n\n')
 
     def __repr__(self):
         rep = f'Solid {self.name} {self.id}'

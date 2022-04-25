@@ -326,7 +326,6 @@ class ReferenceFace(object):
 
         logger.info(f'Successfully exported stls to {directory}')
 
-
         # logger.debug(f'exporting stl for {self.id}')
         # self.assembly.export_stl(filename=filename)
 
@@ -445,32 +444,32 @@ class ReferenceFace(object):
     def generate_quad_mesh(self):
         return Face(fc_face=self.reference_face).create_hex_g_mesh_2(lc=9999999999)
 
-    def generate_mesh_gmsh(self):
-
-        # https://github.com/FreeCAD/FreeCAD/blob/master/src/Mod/Fem/femmesh/gmshtools.py
-        # https://wiki.freecadweb.org/FEM_Tutorial_Python
-        # https://wiki.freecadweb.org/FEM_Tutorial_Python#FEM_mesh_.28gmsh.29
-
-        doc = App.newDocument("gmsh")
-        __o__ = doc.addObject("Part::Feature", f'{self.id}')
-        __o__.Label = f'{self.id}'
-        __o__.Shape = self.assembly.comp_solid
-        mesh = doc.addObject('Fem::FemMeshShapeNetgenObject', 'FEMMeshNetgen')
-        mesh.Shape = __o__
-        mesh.MaxSize = 1000
-        mesh.Fineness = "Moderate"
-        mesh.Optimize = True
-        mesh.SecondOrder = True
-        doc.recompute()
-
-
-
-        doc.FileName = 'test.fcstd'
-        doc.save()
-
-        femmesh_obj = ObjectsFem.makeMeshGmsh(doc, box_obj.Name + "_Mesh")
-        femmesh_obj.Part = doc.Box
-        doc.recompute()
-
-        gmsh_mesh = gt(femmesh_obj)
-        error = gmsh_mesh.create_mesh()
+    # def generate_mesh_gmsh(self):
+    #
+    #     # https://github.com/FreeCAD/FreeCAD/blob/master/src/Mod/Fem/femmesh/gmshtools.py
+    #     # https://wiki.freecadweb.org/FEM_Tutorial_Python
+    #     # https://wiki.freecadweb.org/FEM_Tutorial_Python#FEM_mesh_.28gmsh.29
+    #
+    #     doc = App.newDocument("gmsh")
+    #     __o__ = doc.addObject("Part::Feature", f'{self.id}')
+    #     __o__.Label = f'{self.id}'
+    #     __o__.Shape = self.assembly.comp_solid
+    #     mesh = doc.addObject('Fem::FemMeshShapeNetgenObject', 'FEMMeshNetgen')
+    #     mesh.Shape = __o__
+    #     mesh.MaxSize = 1000
+    #     mesh.Fineness = "Moderate"
+    #     mesh.Optimize = True
+    #     mesh.SecondOrder = True
+    #     doc.recompute()
+    #
+    #
+    #
+    #     doc.FileName = 'test.fcstd'
+    #     doc.save()
+    #
+    #     femmesh_obj = ObjectsFem.makeMeshGmsh(doc, box_obj.Name + "_Mesh")
+    #     femmesh_obj.Part = doc.Box
+    #     doc.recompute()
+    #
+    #     gmsh_mesh = gt(femmesh_obj)
+    #     error = gmsh_mesh.create_mesh()

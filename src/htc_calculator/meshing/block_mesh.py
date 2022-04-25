@@ -85,19 +85,19 @@ class Mesh(object, metaclass=MeshMetaMock):
 
         self.mesh_contacts = {}
 
-        self.vertices = {}
-        self.vertex_ids = {}
-        self.edges = {}
-        self.edge_ids = {}
-        self.parallel_edges = []
-        self.faces = {}
-        self.face_ids = {}
-        self.face_pos = {}
-        self.patch_pairs = {}
-        self.boundaries = {}
-        self.blocks = []
-        self.cell_zones = []
-        self.comp_blocks = []
+        self.vertices = kwargs.get('vertices', {})
+        self.vertex_ids = kwargs.get('vertex_ids', {})
+        self.edges = kwargs.get('edges', {})
+        self.edge_ids = kwargs.get('edge_ids', {})
+        self.parallel_edges = kwargs.get('parallel_edges', [])
+        self.faces = kwargs.get('faces', {})
+        self.face_ids = kwargs.get('face_ids', {})
+        self.face_pos = kwargs.get('face_pos', {})
+        self.patch_pairs = kwargs.get('patch_pairs', {})
+        self.boundaries = kwargs.get('boundaries', {})
+        self.blocks = kwargs.get('blocks', [])
+        self.cell_zones = kwargs.get('cell_zones', [])
+        self.comp_blocks = kwargs.get('comp_blocks', [])
 
         self.vertex_id_counter = CustomID()
         self.edge_id_counter = CustomID()
@@ -367,22 +367,29 @@ class EdgeMetaMock(type):
         return cls.current_mesh.edges
 
     @staticmethod
-    def copy_to_mesh(edge, mesh=None):
+    def copy_to_mesh(edge=None, edges=None, mesh=None):
 
         if mesh is None:
             mesh = EdgeMetaMock.current_mesh
 
-        if edge.id in mesh.edge_ids.keys():
-            in_mesh_edge = edge
-        else:
-            init_dict = copy.copy(edge.__dict__)
-            del init_dict['id']
-            del init_dict['dict_id']
+        if edges is None:
+            edges = [edge]
 
-            init_dict['vertices'] = [BlockMeshVertex(position=edge.vertices[0].position),
-                                     BlockMeshVertex(position=edge.vertices[1].position)]
-            init_dict['mesh'] = mesh
-            in_mesh_edge = BlockMeshEdge(**init_dict)
+        in_mesh_edges = [None] * edges.__len__()
+        for ii, edge in enumerate(edges):
+            if edge.id in mesh.edge_ids.keys():
+                in_mesh_edge = edge
+                in_mesh_edges[ii] = in_mesh_edge
+            else:
+                init_dict = copy.copy(edge.__dict__)
+                del init_dict['id']
+                del init_dict['dict_id']
+
+                init_dict['vertices'] = [BlockMeshVertex(position=edge.vertices[0].position, mesh=mesh),
+                                         BlockMeshVertex(position=edge.vertices[1].position, mesh=mesh)]
+                init_dict['mesh'] = mesh
+                in_mesh_edge = BlockMeshEdge(**init_dict)
+                in_mesh_edges[ii] = in_mesh_edge
 
         # in_mesh_edge = None
         # if edge.id in cls.edge_ids.keys():
@@ -396,7 +403,10 @@ class EdgeMetaMock(type):
         #             init_dict['vertices'] = [BlockMeshVertex(position=edge.vertices[0].position),
         #                                      BlockMeshVertex(position=edge.vertices[1].position)]
         #             in_mesh_edge = BlockMeshEdge(**init_dict)
-        return in_mesh_edge
+        if in_mesh_edges.__len__() == 1:
+            return in_mesh_edges[0]
+        else:
+            return in_mesh_edges
 
 
 class ParallelEdgeSetMetaMock(type):
@@ -485,29 +495,48 @@ class FaceMetaMock(type):
         return cls.current_mesh.faces
 
     @staticmethod
-    def copy_to_mesh(face, mesh=None, merge_meshes=False):
+    def copy_to_mesh(faces, mesh=None, merge_meshes=False):
         if mesh is None:
             mesh = EdgeMetaMock.current_mesh
 
-        if face.id in mesh.face_ids.keys():
-            in_mesh_face = face
+        if not hasattr(faces, '__contains__'):  # make it iterable if is not
+            faces = [faces]
+
+        in_mesh_faces = []
+
+        for face in faces:
+
+            if face.id in mesh.face_ids.keys():
+                in_mesh_face = face
+            else:
+                vertices = [BlockMeshVertex(position=vertex.position, mesh=mesh) for vertex in face.vertices]
+                BlockMeshEdge.copy_to_mesh(edges=face.edges, mesh=mesh)
+
+                init_dict = copy.copy(face.__dict__)
+                init_dict['name'] = f"Copy of {init_dict['name']}"
+
+                delete_keys = ['id', 'dict_id', 'boundary', 'merge', 'merge_patch_pairs', ]
+                for key in delete_keys:
+                    if key in init_dict.keys():
+                        del init_dict[key]
+
+                init_dict['vertices'] = vertices
+                init_dict['mesh'] = mesh
+                init_dict['contacts'] = set([face])
+                in_mesh_face = BlockMeshFace(**init_dict)
+
+                face.contacts.add(in_mesh_face)
+
+                if merge_meshes:
+                    mesh.add_mesh_contact(in_mesh_face, face)
+                    face.mesh.add_mesh_contact(face, in_mesh_face)
+
+            in_mesh_faces.append(in_mesh_face)
+
+        if in_mesh_faces.__len__() == 1:
+            return in_mesh_faces[0]
         else:
-            vertices = np.array([BlockMeshVertex.copy_to_mesh(x, mesh=mesh) for x in face.vertices])
-            _ = np.array([BlockMeshEdge.copy_to_mesh(x) for x in face.edges])
-
-            init_dict = copy.copy(face.__dict__)
-            init_dict['name'] = f"Copy of {init_dict['name']}"
-            del init_dict['id']
-            del init_dict['dict_id']
-            init_dict['vertices'] = vertices
-            init_dict['mesh'] = mesh
-            in_mesh_face = BlockMeshFace(**init_dict)
-
-            if merge_meshes:
-                mesh.add_mesh_contact(in_mesh_face, face)
-                face.mesh.add_mesh_contact(face, in_mesh_face)
-
-        return in_mesh_face
+            return in_mesh_faces
 
 
 class PatchPairMetaMock(type):
@@ -571,7 +600,11 @@ class BoundaryMetaMock(type):
 
         obj = cls.__new__(cls, *args, **kwargs)
         obj.__init__(*args, **kwargs)
-        mesh.boundaries[kwargs.get('name')] = obj
+        if isinstance(mesh, list):
+            for sub_mesh in mesh:
+                sub_mesh.boundaries[kwargs.get('name')] = obj
+        else:
+            mesh.boundaries[kwargs.get('name')] = obj
         return obj
 
     @property
@@ -2751,7 +2784,12 @@ class Block(object, metaclass=BlockMetaMock):
     #     return FCPart.Edge(FCPart.LineSegment(p1, p2))
 
     def __repr__(self):
-        return f'Block {self.id} ({self.name})'
+        if self.cell_zone is None:
+            cz_name = 'Undefined'
+        else:
+            cz_name = self.cell_zone.material.name
+
+        return f'Block {self.id} ({self.name}, {cz_name})'
 
     def dist_to(self, other):
         return self.fc_solid.distToShape(other.fc_solid)[0]
@@ -2960,7 +2998,7 @@ class CompBlock(object, metaclass=CompBlockMetaMock):
                 if comp_block is other_comp_block:
                     continue
 
-                export_objects([comp_block.fc_solid, other_comp_block.fc_solid], '/tmp/blocks.FCStd')
+                # export_objects([comp_block.fc_solid, other_comp_block.fc_solid], '/tmp/blocks.FCStd')
 
                 # split = BOPTools.SplitAPI.booleanFragments([comp_block.fc_solid, other_comp_block.fc_solid], 'Standard', 0.1)
                 #
@@ -3056,42 +3094,59 @@ class BlockMesh(object):
     default_path = '/tmp/'
 
     @classmethod
+    def join_meshes(cls, meshes, mesh_name):
+        last_activated_mesh = VertexMetaMock.current_mesh
+        merged_mesh = cls(name='Block Mesh ' + mesh_name,
+                          mesh=Mesh(name=mesh_name))
+        merged_mesh.mesh.activate()
+
+
+
+        last_activated_mesh.activate()
+
+
+    @classmethod
     def add_mesh_contacts(cls, block_meshes):
 
         logger.info('Adding mesh contacts')
+        mesh_contacts = add_mesh_contacts(block_meshes)
+        # mesh_contacts = []
+        #
+        # for block_mesh in block_meshes:
+        #     for other_block_mesh in block_meshes:
+        #         if block_mesh is other_block_mesh:
+        #             continue
+        #
+        #         common_face_ids = set(block_mesh.mesh.face_pos.keys()).intersection(other_block_mesh.mesh.face_pos.keys())
+        #
+        #         if common_face_ids:
+        #             logger.info(f'Found mesh contacts between:\n'
+        #                         f' {block_mesh} and {other_block_mesh}.\n'
+        #                         f'Common face ids: {[block_mesh.mesh.face_pos[x].id for x in common_face_ids]}\n')
+        #
+        #             mesh_contacts.append(
+        #                 add_face_contacts([block_mesh.mesh.face_pos[x] for x in common_face_ids],
+        #                                   [other_block_mesh.mesh.face_pos[x] for x in common_face_ids],
+        #                                   block_mesh.mesh,
+        #                                   other_block_mesh.mesh,
+        #                                   f'{block_mesh.mesh.txt_id}_to_{other_block_mesh.mesh.txt_id}',
+        #                                   f'{other_block_mesh.mesh.txt_id}_to_{block_mesh.mesh.txt_id}')
+        #             )
+        #
+        # logger.info(f'Successfully added mesh contacts')
+        logger.info('Successfully added mesh contacts')
+        return mesh_contacts
 
-        mesh_contacts = {}
-
-        for block_mesh in block_meshes:
-            for other_block_mesh in block_meshes:
-                if block_mesh is other_block_mesh:
-                    continue
-
-                common_face_ids = set(block_mesh.mesh.face_pos.keys()).intersection(other_block_mesh.mesh.face_pos.keys())
-
-                if common_face_ids:
-                    logger.info(f'Found mesh contacts between:\n'
-                                f' {block_mesh} and {other_block_mesh}.\n'
-                                f'Common face ids: {[block_mesh.mesh.face_pos[x].id for x in common_face_ids]}\n')
-                    c_ami1 = CyclicAMI(name=f'{block_mesh.mesh.txt_id}_to_{other_block_mesh.mesh.txt_id}',
-                                       faces=[block_mesh.mesh.face_pos[x] for x in common_face_ids],
-                                       mesh=block_mesh.mesh,
-                                       user_bc=SolidCyclicAMI())
-
-                    c_ami2 = CyclicAMI(name=f'{other_block_mesh.mesh.txt_id}_to_{block_mesh.mesh.txt_id}',
-                                       faces=[other_block_mesh.mesh.face_pos[x] for x in common_face_ids],
-                                       mesh=other_block_mesh.mesh,
-                                       user_bc=SolidCyclicAMI())
-
-                    c_ami1.neighbour_patch = c_ami2
-                    c_ami2.neighbour_patch = c_ami1
-
-        logger.info(f'Sucessfully added mesh contacts')
+    @classmethod
+    def add_face_contacts(cls, faces1, faces2, mesh1, mesh2, name1, name2):
+        return add_face_contacts(faces1, faces2, mesh1, mesh2, name1, name2)
 
     def __init__(self, *args, **kwargs):
         self._id = kwargs.get('_id', kwargs.get('id', uuid.uuid4()))
         self._name = kwargs.get('_name', kwargs.get('name', 'BlockMesh {}'.format(self._id)))
         self._case_dir = kwargs.get('_case_dir', kwargs.get('case_dir', None))
+
+        # self.type = kwargs.get('type')
 
         self.template = pkg_resources.read_text(msh_resources, 'block_mesh_dict')
         self._block_mesh_dict = None
@@ -3099,7 +3154,7 @@ class BlockMesh(object):
         self._fvschemes = None
         self._fvsolution = None
 
-        self.blocks = kwargs.get('blocks', None)
+        # self.blocks = kwargs.get('blocks', None)
         self.mesh = kwargs.get('mesh', None)
 
         self.top_faces = kwargs.get('top_faces', [])
@@ -3475,6 +3530,33 @@ class BlockMesh(object):
             logger.error(f"{res.stderr.decode('ascii')}")
             raise Exception(f"Error creating block Mesh:\n{res.stderr.decode('ascii')}")
         return True
+
+    def __repr__(self):
+        return f'BlockMesh {self.id} ({self.name}, ' \
+               f'Blocks: {self.mesh.blocks.__len__()}, ' \
+               f'Faces: {self.mesh.faces.__len__()}, ' \
+               f'Edges: {self.mesh.edges.__len__()}, ' \
+               f'Vertices: {self.mesh.vertices.__len__()})'
+
+
+class PipeMesh(BlockMesh):
+    pass
+
+
+class LayerMesh(BlockMesh):
+    pass
+
+
+class ConstructionMesh(BlockMesh):
+    pass
+
+
+class UpperPipeLayerMesh(BlockMesh):
+    pass
+
+
+class LowerPipeLayerMesh(BlockMesh):
+    pass
 
 
 def unit_vector(vec):
@@ -3954,7 +4036,7 @@ def angle_between_vertices(p1, p2, p3, deg=True):
         return angle
 
 
-def extrude_2d_mesh(mesh, distance, direction):
+def extrude_2d_mesh(mesh, distance, direction, block_name='Extruded Block'):
 
     blocks = []
     # create_vertices:
@@ -3966,7 +4048,7 @@ def extrude_2d_mesh(mesh, distance, direction):
             v_1 = vertices[quad]
             v_2 = np.array([x + distance * direction for x in v_1])
             new_block = Block(vertices=[*v_1, *v_2],
-                              name=f'Free Block',
+                              name=block_name,
                               auto_cell_size=True,
                               extruded=False)
             blocks.append(new_block)
@@ -3977,7 +4059,7 @@ def extrude_2d_mesh(mesh, distance, direction):
             v_2 = np.array([x + distance * direction for x in v_1])
 
             new_block = Block(vertices=[*v_1, *v_2],
-                              name=f'Free Block',
+                              name=block_name,
                               auto_cell_size=True,
                               extruded=False,
                               non_regular=True)
@@ -3999,7 +4081,7 @@ def create_blocks_from_2d_mesh(meshes, reference_face):
         dist = 2 * (reference_face.tube_diameter / 2 / np.sqrt(2) + reference_face.tube_diameter / 4)
         direction = np.array(reference_face.normal)
 
-        blocks = extrude_2d_mesh(mesh, dist, direction)
+        blocks.extend(extrude_2d_mesh(mesh, dist, direction))
         # vertices = np.array([BlockMeshVertex(position=x) for x in mesh.points])
 
         # create quad blocks:
@@ -4069,3 +4151,50 @@ def make_complex_face_from_edges(edges):
     # if ps.isReady():
     #     ps.build()
     # return ps.shape()
+
+
+def add_face_contacts(faces1, faces2, mesh1, mesh2, name1, name2):
+
+    c_ami1 = CyclicAMI(name=name1,
+                       faces=faces1,
+                       mesh=mesh1,
+                       user_bc=SolidCyclicAMI())
+
+    c_ami2 = CyclicAMI(name=name2,
+                       faces=faces2,
+                       mesh=mesh2,
+                       user_bc=SolidCyclicAMI())
+
+    c_ami1.neighbour_patch = c_ami2
+    c_ami2.neighbour_patch = c_ami1
+
+    return c_ami1, c_ami2
+
+
+def add_mesh_contacts(block_meshes):
+
+    mesh_contacts = []
+
+    for block_mesh in block_meshes:
+        for other_block_mesh in block_meshes:
+            if block_mesh is other_block_mesh:
+                continue
+
+            common_face_ids = set(block_mesh.mesh.face_pos.keys()).intersection(
+                other_block_mesh.mesh.face_pos.keys())
+
+            if common_face_ids:
+                logger.info(f'Found mesh contacts between:\n'
+                            f' {block_mesh} and {other_block_mesh}.\n'
+                            f'Common face ids: {[block_mesh.mesh.face_pos[x].id for x in common_face_ids]}\n')
+
+                mesh_contacts.append(
+                    add_face_contacts([block_mesh.mesh.face_pos[x] for x in common_face_ids],
+                                      [other_block_mesh.mesh.face_pos[x] for x in common_face_ids],
+                                      block_mesh.mesh,
+                                      other_block_mesh.mesh,
+                                      f'{block_mesh.mesh.txt_id}_to_{other_block_mesh.mesh.txt_id}',
+                                      f'{other_block_mesh.mesh.txt_id}_to_{block_mesh.mesh.txt_id}')
+                )
+
+    return mesh_contacts

@@ -381,7 +381,7 @@ def extrude(path, sections: list, additional_paths=None, occ=False):
 
 def create_pipe(edges, tube_diameter, face_normal):
 
-    export_objects([*edges], '/tmp/tube_edges.FCStd')
+    # export_objects([*edges], '/tmp/tube_edges.FCStd')
 
     inlet = None
     outlet = None

@@ -9,7 +9,7 @@ from re import findall, MULTILINE
 from ..config import work_dir
 from ..logger import logger
 from ..meshing.block_mesh import BlockMesh, inlet_patch, outlet_patch, wall_patch, pipe_wall_patch, top_side_patch, \
-    bottom_side_patch, CellZone, BlockMeshBoundary, Mesh, CreatePatchDict
+    bottom_side_patch, CellZone, BlockMeshBoundary, Mesh, CreatePatchDict, export_objects
 from ..construction import write_region_properties, Fluid, Solid
 from .boundary_conditions.user_bcs import SolidFluidInterface, FluidSolidInterface
 from .. import config
@@ -423,12 +423,22 @@ class OFCase(object):
     def run_with_separate_meshes(self):
         _ = self.reference_face.pipe_comp_blocks
         _ = self.reference_face.free_comp_blocks
+        # export_objects([self.reference_face.free_comp_blocks.fc_solid], '/tmp/free_comp_blocks.FCStd')
         _ = self.reference_face.layer_meshes
         # _ = self.reference_face.extruded_comp_blocks
-        comp_blocks = self.reference_face.comp_blocks
 
-        self.reference_face.update_cell_zone()
+        block_meshes = [self.reference_face.pipe_mesh,
+                        self.reference_face.construction_mesh,
+                        *self.reference_face.layer_meshes]
+
+        blocks = []
+        _ = [blocks.extend(x.mesh.blocks) for x in block_meshes]
+        self.reference_face.update_cell_zone(blocks=blocks)
         self.reference_face.update_boundary_conditions()
+
+        for block_mesh in block_meshes:
+            block_mesh.init_case()
+            block_mesh.run_block_mesh(run_parafoam=True)
 
         block_meshes = []
         for key, mesh in Mesh.instances.items():

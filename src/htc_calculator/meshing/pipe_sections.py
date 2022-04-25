@@ -23,8 +23,8 @@ class PipeSection(object):
         self.vertex_indices = kwargs.get('vertex_indices')                          #
         self.edge_indices = kwargs.get('edge_indices')                              #
         self.cell_zones = kwargs.get('cell_zones')  #
-        self.block_cell_zones = kwargs.get('block_cell_zones')                                  #
-        self.cell_zone_ids = kwargs.get('cell_zone_ids')                                  #
+        self.block_cell_zones = kwargs.get('block_cell_zones')                      #
+        self.cell_zone_ids = kwargs.get('cell_zone_ids')                            #
 
         self.n_cell = kwargs.get('n_cell')                                          #
         self.cell_size = kwargs.get('cell_size')
@@ -122,10 +122,10 @@ class PipeSection(object):
                 pipe_layer_extrude_bottom = None
 
             if cell_zones is not None:
-                block_name = cell_zones.material.name
+                block_name = 'Pipe Block ' + cell_zones.material.name
                 cell_zone = cell_zones
             else:
-                block_name = None
+                block_name = 'Pipe Outer Block'
                 cell_zone = None
 
             new_block = Block(name=block_name,
@@ -141,15 +141,15 @@ class PipeSection(object):
                               pipe_layer_bottom=pipe_layer_bottom,
                               pipe_layer_extrude_top=pipe_layer_extrude_top,
                               pipe_layer_extrude_bottom=pipe_layer_extrude_bottom)
-            try:
-                export_objects([new_block.fc_solid], '/tmp/blocks.FCStd')
-            except Exception as e:
-                export_objects([x.fc_edge for x in new_block.face3.edges], '/tmp/face3_edges.FCStd')
-                export_objects([x.fc_edge for x in block_edges], '/tmp/init_block_edges.FCStd')
-                export_objects([new_block.face0.fc_face], '/tmp/face0.FCStd')
-                export_objects([x.fc_face for x in new_block.faces], '/tmp/faces.FCStd')
-                export_objects([x.fc_edge for x in new_block.block_edges], '/tmp/edges.FCStd')
-                raise e
+            # try:
+            #     export_objects([new_block.fc_solid], '/tmp/blocks.FCStd')
+            # except Exception as e:
+            #     export_objects([x.fc_edge for x in new_block.face3.edges], '/tmp/face3_edges.FCStd')
+            #     export_objects([x.fc_edge for x in block_edges], '/tmp/init_block_edges.FCStd')
+            #     export_objects([new_block.face0.fc_face], '/tmp/face0.FCStd')
+            #     export_objects([x.fc_face for x in new_block.faces], '/tmp/faces.FCStd')
+            #     export_objects([x.fc_edge for x in new_block.block_edges], '/tmp/edges.FCStd')
+            #     raise e
 
             blocks.append(new_block)
 
