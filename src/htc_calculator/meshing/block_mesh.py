@@ -3356,6 +3356,9 @@ class BlockMesh(object):
         bottom_faces = [[face_lookup_dict[y.id] for y in x.bottom_faces] for x in meshes]
         interfaces = [[face_lookup_dict[y.id] for y in x.interfaces] for x in meshes]
 
+        # add cyclicAMI at interfaces:
+
+
         merged_block_mesh = cls(
             name='Block Mesh ' + mesh_name,
             top_faces=functools.reduce(operator.iconcat, top_faces, []),
