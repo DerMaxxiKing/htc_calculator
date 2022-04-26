@@ -427,6 +427,10 @@ class OFCase(object):
         _ = self.reference_face.layer_meshes
         # _ = self.reference_face.extruded_comp_blocks
 
+        joined_pipe_layer_mesh = BlockMesh.join_meshes([self.reference_face.pipe_mesh,
+                                                        self.reference_face.construction_mesh],
+                                                       'joined_pipe_layer_mesh')
+
         block_meshes = [self.reference_face.pipe_mesh,
                         self.reference_face.construction_mesh,
                         *self.reference_face.layer_meshes]

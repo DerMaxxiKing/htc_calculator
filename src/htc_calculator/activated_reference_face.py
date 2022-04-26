@@ -347,7 +347,7 @@ class ActivatedReferenceFace(ReferenceFace):
         quad_meshes = [Face(fc_face=x).create_hex_g_mesh_2(lc=9999999999) for x in [cutted_face.SubShapes[0],
                                                                                     FCPart.Face(wire)]]
         logger.info(f'Extruding blocks for free faces mesh')
-        free_blocks = create_blocks_from_2d_mesh(quad_meshes, self)
+        free_blocks = create_blocks_from_2d_mesh(quad_meshes, self, mesh_to_add=mesh)
 
         for block in free_blocks:
             block.pipe_layer_top = True
