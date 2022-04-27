@@ -204,7 +204,7 @@ class Mesh(object, metaclass=MeshMetaMock):
         block_lookup_dict = dict()
 
         for mesh in meshes:
-            new_vertices = BlockMeshVertex.copy_to_mesh(list(mesh.vertices.values()),
+            new_vertices = BlockMeshVertex.copy_to_mesh(list(mesh.vertex_ids.values()),
                                                         mesh=merged_mesh,
                                                         check_existing=False)
 
@@ -315,6 +315,127 @@ class Mesh(object, metaclass=MeshMetaMock):
         last_activated_mesh.activate()
         return merged_mesh, vertex_lookup_dict, edge_lookup_dict, face_lookup_dict, block_lookup_dict, \
                boundary_lookup_dict
+
+    def add_mesh_copy(self, mesh):
+        last_activated_mesh = VertexMetaMock.current_mesh
+        self.activate()
+        vertex_lookup_dict = dict()
+        edge_lookup_dict = dict()
+        face_lookup_dict = dict()
+        boundary_lookup_dict = dict()
+        block_lookup_dict = dict()
+
+        new_vertices = BlockMeshVertex.copy_to_mesh(list(mesh.vertex_ids.values()),
+                                                    mesh=self,
+                                                    check_existing=False)
+
+        vertex_lookup_dict.update(dict(zip([x.id for x in mesh.vertex_ids.values()], new_vertices)))
+
+        def copy_edges(edges, v_lookup_dict):
+            in_mesh_edges = [None] * edges.__len__()
+            for ii, edge in enumerate(edges):
+                init_dict = copy.copy(edge.__dict__)
+                del init_dict['id']
+                del init_dict['dict_id']
+
+                init_dict['num_cells'] = init_dict['_num_cells']
+
+                init_dict['vertices'] = [v_lookup_dict[edge.vertices[0].id], v_lookup_dict[edge.vertices[1].id]]
+                init_dict['mesh'] = self
+                in_mesh_edge = BlockMeshEdge(**init_dict)
+                in_mesh_edges[ii] = in_mesh_edge
+
+            return in_mesh_edges
+
+        def copy_faces(instances, e_lookup_dict, v_lookup_dict):
+            in_mesh_instances = [None] * instances.__len__()
+            for ii, instance in enumerate(instances):
+                init_dict = copy.copy(instance.__dict__)
+                delete_keys = ['id', 'dict_id', 'boundary', 'merge', 'merge_patch_pairs', 'contacts']
+                for key in delete_keys:
+                    if key in init_dict.keys():
+                        del init_dict[key]
+
+                init_dict['vertices'] = [v_lookup_dict[x.id] for x in instance.vertices]
+                init_dict['_edge0'] = e_lookup_dict[instance.edge0.id]
+                init_dict['_edge1'] = e_lookup_dict[instance.edge1.id]
+                init_dict['_edge2'] = e_lookup_dict[instance.edge2.id]
+                init_dict['_edge3'] = e_lookup_dict[instance.edge3.id]
+                init_dict['mesh'] = self
+
+                in_mesh_instances[ii] = BlockMeshFace(**init_dict)
+
+            return in_mesh_instances
+
+        def copy_blocks(instances, f_lookup_dict, e_lookup_dict, v_lookup_dict):
+            in_mesh_instances = [None] * instances.__len__()
+            for ii, instance in enumerate(instances):
+                init_dict = copy.copy(instance.__dict__)
+                delete_keys = ['id', 'dict_id', 'patch_pairs', 'merge_patch_pairs']
+                for key in delete_keys:
+                    if key in init_dict.keys():
+                        del init_dict[key]
+
+                init_dict['vertices'] = [v_lookup_dict[x.id] for x in instance.vertices]
+                init_dict['num_cells'] = init_dict['_num_cells']
+
+                init_dict['edge0'] = e_lookup_dict[instance.edge0.id]
+                init_dict['edge1'] = e_lookup_dict[instance.edge1.id]
+                init_dict['edge2'] = e_lookup_dict[instance.edge2.id]
+                init_dict['edge3'] = e_lookup_dict[instance.edge3.id]
+                init_dict['edge4'] = e_lookup_dict[instance.edge4.id]
+                init_dict['edge5'] = e_lookup_dict[instance.edge5.id]
+                init_dict['edge6'] = e_lookup_dict[instance.edge6.id]
+                init_dict['edge7'] = e_lookup_dict[instance.edge7.id]
+                init_dict['edge8'] = e_lookup_dict[instance.edge8.id]
+                init_dict['edge9'] = e_lookup_dict[instance.edge9.id]
+                init_dict['edge10'] = e_lookup_dict[instance.edge10.id]
+                init_dict['edge11'] = e_lookup_dict[instance.edge11.id]
+
+                init_dict['face0'] = f_lookup_dict[instance.face0.id]
+                init_dict['face1'] = f_lookup_dict[instance.face1.id]
+                init_dict['face2'] = f_lookup_dict[instance.face2.id]
+                init_dict['face3'] = f_lookup_dict[instance.face3.id]
+                init_dict['face4'] = f_lookup_dict[instance.face4.id]
+                init_dict['face5'] = f_lookup_dict[instance.face5.id]
+
+                init_dict['mesh'] = self
+
+                in_mesh_instances[ii] = Block(**init_dict)
+
+            return in_mesh_instances
+
+        def copy_boundaries(instances, face_lookup_dict):
+            in_mesh_instances = [None] * instances.__len__()
+            for ii, instance in enumerate(instances):
+                init_dict = copy.copy(instance.__dict__)
+                delete_keys = ['id', 'alt_id', 'dict_id', 'boundary', 'merge', 'merge_patch_pairs', 'contacts']
+                for key in delete_keys:
+                    if key in init_dict.keys():
+                        del init_dict[key]
+
+                init_dict['faces'] = set([face_lookup_dict[x.id] for x in instance.faces])
+                init_dict['mesh'] = self
+
+                in_mesh_instances[ii] = BlockMeshBoundary(**init_dict)
+
+            return in_mesh_instances
+
+        new_edges = copy_edges(list(mesh.edges.values()), vertex_lookup_dict)
+        edge_lookup_dict.update(dict(zip([x.id for x in mesh.edges.values()], new_edges)))
+
+        new_faces = copy_faces(list(mesh.faces.values()), edge_lookup_dict, vertex_lookup_dict)
+        face_lookup_dict.update(dict(zip([x.id for x in mesh.faces.values()], new_faces)))
+
+        new_blocks = copy_blocks(mesh.blocks, face_lookup_dict, edge_lookup_dict, vertex_lookup_dict)
+        block_lookup_dict.update(dict(zip([x.id for x in mesh.blocks], new_blocks)))
+
+        new_boundaries = copy_boundaries(list(mesh.boundaries.values()), face_lookup_dict)
+        boundary_lookup_dict.update(dict(zip([x.id for x in list(mesh.boundaries.values())], new_boundaries)))
+
+        last_activated_mesh.activate()
+
+        return vertex_lookup_dict, edge_lookup_dict, face_lookup_dict, boundary_lookup_dict, block_lookup_dict
 
     def __repr__(self):
         return f'Mesh {self.id} (name={self.name}, verts: {self.vertices.__len__()} ' \
@@ -3517,6 +3638,25 @@ class BlockMesh(object):
         if value == self._case_dir:
             return
         self._case_dir = value
+
+    def add_mesh_copy(self, other_block_mesh, copy_feature_faces=True):
+
+        logger.info(f'Adding mesh copy of {other_block_mesh.name} to {self.name}')
+
+        _, _, face_lookup_dict, boundary_lookup_dict, _ = self.mesh.add_mesh_copy(other_block_mesh.mesh)
+
+        if copy_feature_faces:
+            top_faces = [face_lookup_dict[y.id] for y in other_block_mesh.top_faces]
+            bottom_faces = [face_lookup_dict[y.id] for y in other_block_mesh.bottom_faces]
+            interfaces = [face_lookup_dict[y.id] for y in other_block_mesh.interfaces]
+
+            self.top_faces.extend(top_faces)
+            self.bottom_faces.extend(bottom_faces)
+            self.interfaces.extend(interfaces)
+
+        logger.info(f'Successfully added mesh copy of {other_block_mesh.name}')
+
+        return face_lookup_dict
 
     def init_case(self):
         logger.info(f'Initializing Block Mesh in {self.case_dir}')

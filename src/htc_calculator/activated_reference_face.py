@@ -479,7 +479,7 @@ class ActivatedReferenceFace(ReferenceFace):
                 quad_mesh = copy.copy(self.quad_mesh)
                 quad_mesh.points = quad_mesh.points + offset0 + layer_positions[i] * self.normal * self.layer_dir
                 layer_blocks = extrude_2d_mesh(quad_mesh,
-                                               distance=layer_thickness,
+                                               distance=layer_positions[i+1] - layer_thickness,
                                                direction=self.normal,
                                                block_name=f'Layer {i} block')
                 new_blocks.extend(layer_blocks)
@@ -590,36 +590,77 @@ class ActivatedReferenceFace(ReferenceFace):
         logger.info('Cell zones updated successfully')
 
     def combine_meshes(self):
-        logger.info('Joining layer meshes...')
-
+        logger.info('Creating combined mesh...')
         combined_mesh = BlockMesh(name='Combined Block Mesh',
                                   mesh=Mesh(name='Combined Mesh'))
 
-        num_layers = self.component_construction.layers.__len__()
         for i, layer in enumerate(self.component_construction.layers):
 
+            is_pipe_layer = layer is self.pipe_layer
 
+            if is_pipe_layer:
+                # combine with lower pipe_layer_mesh
+                bottom_mesh = next(filter(lambda x: type(x) == LowerPipeLayerMesh, layer.meshes))
+                top_mesh = next(filter(lambda x: type(x) == UpperPipeLayerMesh, layer.meshes))
+                pipe_layer_mesh = next(filter(lambda x: type(x) == PipeLayerMesh, layer.meshes))
 
-            if i == 0:
-                _ = [setattr(x, 'boundary', bottom_side_patch) for x in list(layer.meshes)[0].bottom_faces]
+                bottom_face_lookup_dict = combined_mesh.add_mesh_copy(bottom_mesh, copy_feature_faces=False)
+                pipe_layer_face_lookup_dict = combined_mesh.add_mesh_copy(pipe_layer_mesh, copy_feature_faces=False)
+                top_face_lookup_dict = combined_mesh.add_mesh_copy(top_mesh, copy_feature_faces=False)
 
-            if i == num_layers - 1:
-                _ = [setattr(x, 'boundary', top_side_patch) for x in list(layer.meshes)[0].top_faces]
-            else:
-                top_mesh = list(layer.meshes)[0]
+                add_face_contacts([bottom_face_lookup_dict[x.id] for x in bottom_mesh.top_faces],
+                                  [pipe_layer_face_lookup_dict[x.id] for x in pipe_layer_mesh.bottom_faces],
+                                  combined_mesh.mesh,
+                                  combined_mesh.mesh,
+                                  f'pipe_layer_bottom_to_pipe_layer_middle',
+                                  f'pipe_layer_middle_to_pipe_layer_bottom')
 
-                next_layer = self.component_construction.layers[i + 1]
-                if next_layer is self.pipe_layer:
-                    bottom_mesh = next(filter(lambda x: type(x) == LowerPipeLayerMesh, next_layer.meshes))
+                add_face_contacts([pipe_layer_face_lookup_dict[x.id] for x in pipe_layer_mesh.top_faces],
+                                  [top_face_lookup_dict[x.id] for x in top_mesh.bottom_faces],
+                                  combined_mesh.mesh,
+                                  combined_mesh.mesh,
+                                  f'pipe_layer_top_to_pipe_layer_middle',
+                                  f'pipe_layer_middle_to_pipe_layer_top')
+                if i == 0:
+                    combined_mesh.bottom_faces = [bottom_face_lookup_dict[x.id] for x in bottom_mesh.bottom_faces]
                 else:
-                    bottom_mesh = list(next_layer.meshes)[0]
+                    add_face_contacts(combined_mesh.top_faces,
+                                      [bottom_face_lookup_dict[x.id] for x in bottom_mesh.bottom_faces],
+                                      combined_mesh.mesh,
+                                      combined_mesh.mesh,
+                                      f'layer_{i - 1}_to_layer_{i}',
+                                      f'layer_{i}_to_layer_{i - 1}')
+                combined_mesh.top_faces = [top_face_lookup_dict[x.id] for x in top_mesh.top_faces]
+            else:
+                layer_block_mesh = list(layer.meshes)[0]
+                face_lookup_dict = combined_mesh.add_mesh_copy(layer_block_mesh, copy_feature_faces=False)
+                if i == 0:
+                    combined_mesh.bottom_faces = [face_lookup_dict[x.id] for x in layer_block_mesh.bottom_faces]
+                else:
+                    add_face_contacts(combined_mesh.top_faces,
+                                      [face_lookup_dict[x.id] for x in layer_block_mesh.bottom_faces],
+                                      combined_mesh.mesh,
+                                      combined_mesh.mesh,
+                                      f'layer_{i-1}_to_layer_{i}',
+                                      f'layer_{i}_to_layer_{i-1}')
+                combined_mesh.top_faces = [face_lookup_dict[x.id] for x in layer_block_mesh.top_faces]
 
-                add_face_contacts(top_mesh.top_faces,
-                                  bottom_mesh.bottom_faces,
-                                  top_mesh.mesh,
-                                  bottom_mesh.mesh,
-                                  f'{top_mesh.mesh.txt_id}_to_{bottom_mesh.mesh.txt_id}',
-                                  f'{bottom_mesh.mesh.txt_id}_to_{top_mesh.mesh.txt_id}')
+        # export_objects([FCPart.Compound([x.fc_face for x in combined_mesh.top_faces]),
+        #                 FCPart.Compound([x.fc_face for x in combined_mesh.bottom_faces]),
+        #                 FCPart.Compound([x.fc_face for x in combined_mesh.mesh.boundaries['inlet'].faces]),
+        #                 FCPart.Compound([x.fc_face for x in combined_mesh.mesh.boundaries['outlet'].faces]),
+        #                 FCPart.Compound([x.fc_face for x in combined_mesh.mesh.boundaries['fluid_wall'].faces]),
+        #                 FCPart.Compound([x.fc_face for x in combined_mesh.mesh.boundaries['layer_0_to_layer_1'].faces])
+        #                 ],
+        #                '/tmp/boundaries.FCStd'
+        #                )
+        #
+        # export_objects([FCPart.Compound([x.fc_solid for x in combined_mesh.mesh.blocks])],
+        #                '/tmp/blocks.FCStd'
+        #                )
+
+        logger.info('Successfully created combined mesh')
+        return combined_mesh
 
     def update_boundary_conditions(self, faces=None):
 
