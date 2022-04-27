@@ -597,6 +597,9 @@ class ActivatedReferenceFace(ReferenceFace):
 
         num_layers = self.component_construction.layers.__len__()
         for i, layer in enumerate(self.component_construction.layers):
+
+
+
             if i == 0:
                 _ = [setattr(x, 'boundary', bottom_side_patch) for x in list(layer.meshes)[0].bottom_faces]
 

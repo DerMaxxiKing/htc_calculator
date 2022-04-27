@@ -1,14 +1,16 @@
 from .construction import Solid, Fluid
 
+# Fluid properties
 water = Fluid(name='water',
               id='f001',
               mol_weight=18,
               density=1000,
               specific_heat_capacity=4181,
               hf=0,
-              mu=959*10e-6,
+              mu=959e-6,
               pr=6.62)
 
+# Solid properties
 aluminium = Solid(name='aluminium',
                   id='s001',
                   mol_weight=27,
