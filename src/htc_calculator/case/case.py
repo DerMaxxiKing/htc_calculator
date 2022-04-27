@@ -9,7 +9,7 @@ from re import findall, MULTILINE
 from ..config import work_dir
 from ..logger import logger
 from ..meshing.block_mesh import BlockMesh, inlet_patch, outlet_patch, wall_patch, pipe_wall_patch, top_side_patch, \
-    bottom_side_patch, CellZone, BlockMeshBoundary, Mesh, CreatePatchDict, export_objects
+    bottom_side_patch, CellZone, BlockMeshBoundary, Mesh, CreatePatchDict, export_objects, add_face_contacts, PipeLayerMesh
 from ..construction import write_region_properties, Fluid, Solid
 from .boundary_conditions.user_bcs import SolidFluidInterface, FluidSolidInterface
 from .. import config
@@ -427,12 +427,28 @@ class OFCase(object):
         _ = self.reference_face.layer_meshes
         # _ = self.reference_face.extruded_comp_blocks
 
-        joined_pipe_layer_mesh = BlockMesh.join_meshes([self.reference_face.pipe_mesh,
-                                                        self.reference_face.construction_mesh],
-                                                       'joined_pipe_layer_mesh')
+        joined_pipe_layer_mesh, face_lookup_dict = PipeLayerMesh.join_meshes(
+            [self.reference_face.pipe_mesh,
+             self.reference_face.construction_mesh],
+            'joined_pipe_layer_mesh',
+        )
+        self.reference_face.pipe_layer.meshes.remove(self.reference_face.pipe_mesh)
+        self.reference_face.pipe_layer.meshes.remove(self.reference_face.construction_mesh)
+        self.reference_face.pipe_layer.meshes.add(joined_pipe_layer_mesh)
 
-        block_meshes = [self.reference_face.pipe_mesh,
-                        self.reference_face.construction_mesh,
+        # add cyclicAMI at interfaces:
+        add_face_contacts([face_lookup_dict[x.id] for x in self.reference_face.pipe_mesh.interfaces],
+                          [face_lookup_dict[x.id] for x in self.reference_face.construction_mesh.interfaces],
+                          joined_pipe_layer_mesh.mesh,
+                          joined_pipe_layer_mesh.mesh,
+                          f'pipe_mesh_to_construction_mesh',
+                          f'construction_mesh_to_pipe_mesh'
+                          )
+
+        combined_mesh = self.reference_face.combine_meshes()
+
+        logger.info('Adding cyclicAMI boundary condition to mesh interfaces')
+        block_meshes = [joined_pipe_layer_mesh,
                         *self.reference_face.layer_meshes]
 
         blocks = []
@@ -443,6 +459,11 @@ class OFCase(object):
         for block_mesh in block_meshes:
             block_mesh.init_case()
             block_mesh.run_block_mesh(run_parafoam=True)
+
+        # create empty case
+
+        for mesh in block_meshes[1:]:
+            block_meshes[0].merge_mesh(mesh)
 
         block_meshes = []
         for key, mesh in Mesh.instances.items():

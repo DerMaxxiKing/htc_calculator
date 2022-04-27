@@ -2,10 +2,10 @@ import numpy as np
 import copy
 
 from ..logger import logger
-from .block_mesh import BlockMeshVertex, BlockMeshEdge, Block, unit_vector, create_edges_between_layers, \
-    pipe_wall_patch, inlet_patch, outlet_patch, wall_patch, fluid_wall_patch
+from .block_mesh import BlockMeshVertex, BlockMeshEdge, Block, create_edges_between_layers, BlockMeshBoundary
 from ..geo_tools import get_position
 from ..tools import vector_to_np_array, perpendicular_vector, export_objects
+from ..case.boundary_conditions.user_bcs import VolumeFlowInlet, Outlet, FluidWall
 
 import FreeCAD
 import Part as FCPart
@@ -16,6 +16,11 @@ import DraftVecUtils
 class PipeSection(object):
 
     def __init__(self, *args, **kwargs):
+
+        self._block_mesh = None
+        self._inlet_patch = None
+        self._outlet_patch = None
+        self._fluid_wall_patch = None
 
         self.name = kwargs.get('name')
         self.layer_vertex_gen_function = kwargs.get('layer_vertex_gen_function')    # function which generates vertices for the section
@@ -42,6 +47,15 @@ class PipeSection(object):
         self.interface_side = kwargs.get('interface_side', dict())
         self.merge_patch_pairs = kwargs.get('merge_patch_pairs', [{}, {}])
 
+        self.block_mesh = kwargs.get('block_mesh', None)
+
+        if kwargs.get('inlet_patch', None) is not None:
+            self.inlet_patch = kwargs.get('inlet_patch', None)
+        if kwargs.get('outlet_patch', None) is not None:
+            self.outlet_patch = kwargs.get('outlet_patch', None)
+        if kwargs.get('fluid_wall_patch', None) is not None:
+            self.fluid_wall_patch = kwargs.get('fluid_wall_patch', None)
+
     @property
     def materials(self):
         return self._materials
@@ -53,6 +67,55 @@ class PipeSection(object):
         for i, material in enumerate(self._materials):
             if self.cell_zones is not None:
                 self.cell_zones[i].material = material
+
+    @property
+    def block_mesh(self):
+        return self._block_mesh
+
+    @block_mesh.setter
+    def block_mesh(self, value):
+        if value is self._block_mesh:
+            return
+        self._block_mesh = value
+
+        self.inlet_patch = BlockMeshBoundary(name='inlet',
+                                             type='patch',
+                                             user_bc=VolumeFlowInlet(),
+                                             mesh=self._block_mesh.mesh)
+
+        self.outlet_patch = BlockMeshBoundary(name='outlet',
+                                              type='patch',
+                                              user_bc=Outlet(),
+                                              mesh=self._block_mesh.mesh)
+
+        self.fluid_wall_patch = BlockMeshBoundary(name='fluid_wall',
+                                                  type='wall',
+                                                  user_bc=FluidWall(),
+                                                  mesh=self._block_mesh.mesh)
+
+    @property
+    def inlet_patch(self):
+        return self._inlet_patch
+
+    @inlet_patch.setter
+    def inlet_patch(self, value):
+        self._inlet_patch = value
+
+    @property
+    def outlet_patch(self):
+        return self._outlet_patch
+
+    @outlet_patch.setter
+    def outlet_patch(self, value):
+        self._outlet_patch = value
+
+    @property
+    def fluid_wall_patch(self):
+        return self._fluid_wall_patch
+
+    @fluid_wall_patch.setter
+    def fluid_wall_patch(self, value):
+        self._fluid_wall_patch = value
 
     def create_block(self, *args, **kwargs):
 
@@ -154,17 +217,17 @@ class PipeSection(object):
             blocks.append(new_block)
 
         if not outer_pipe:
-            _ = [[setattr(blocks[xx[0]].faces[yy], 'boundary', fluid_wall_patch)
+            _ = [[setattr(blocks[xx[0]].faces[yy], 'boundary', self.fluid_wall_patch)
                   for yy in xx[1]] for xx in self.pipe_wall_def]
 
         if inlet:
             for block_inlet in self.block_inlet_faces:
                 for face_nr in block_inlet[1]:
-                    blocks[block_inlet[0]].faces[face_nr].boundary = inlet_patch
+                    blocks[block_inlet[0]].faces[face_nr].boundary = self.inlet_patch
         if outlet:
             for block_outlet in self.block_outlet_faces:
                 for face_nr in block_outlet[1]:
-                    blocks[block_outlet[0]].faces[face_nr].boundary = outlet_patch
+                    blocks[block_outlet[0]].faces[face_nr].boundary = self.outlet_patch
         return blocks
 
     def create_layer_vertices(self,
