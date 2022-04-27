@@ -13,7 +13,8 @@ from .solid import Solid, PipeSolid
 from .meshing import block_mesh as imp_block_mesh
 from .meshing.block_mesh import create_blocks_from_2d_mesh, Mesh, BlockMesh, \
     CompBlock, NoNormal, bottom_side_patch, top_side_patch, CellZone, wall_patch, extrude_2d_mesh, Block, \
-    BlockMeshEdge, BlockMeshFace, PipeMesh, ConstructionMesh, LayerMesh, UpperPipeLayerMesh, LowerPipeLayerMesh, add_face_contacts
+    BlockMeshEdge, BlockMeshFace, PipeMesh, ConstructionMesh, LayerMesh, UpperPipeLayerMesh, LowerPipeLayerMesh, \
+    add_face_contacts, PipeLayerMesh
 from .logger import logger
 from .tools import export_objects, split_wire_by_projected_vertices
 from .case.case import OFCase
@@ -49,6 +50,8 @@ class ActivatedReferenceFace(ReferenceFace):
 
         self.pipe_mesh = PipeMesh(name='Block Mesh ' + 'pipe_layer_mesh',
                                   mesh=Mesh(name='pipe_layer_mesh'))
+        self.pipe_section = kwargs.get('pipe_section')
+        self.pipe_section.block_mesh = self.pipe_mesh
 
         # if no seperated meshes should be created, add all to self.pipe_mesh
         if self.separate_meshes:
@@ -63,7 +66,6 @@ class ActivatedReferenceFace(ReferenceFace):
 
         self.default_mesh_size = kwargs.get('default_mesh_size', 100)
         self.default_arc_cell_size = kwargs.get('default_arc_cell_size', 20)
-        self.pipe_section = kwargs.get('pipe_section')
         self.tube_diameter = kwargs.get('tube_diameter', 0.02)
         self.tube_inner_diameter = kwargs.get('tube_inner_diameter', 0.016)
         self.tube_material = kwargs.get('tube_material', None)
@@ -587,6 +589,36 @@ class ActivatedReferenceFace(ReferenceFace):
 
         logger.info('Cell zones updated successfully')
 
+    def combine_meshes(self):
+        logger.info('Joining layer meshes...')
+
+        combined_mesh = BlockMesh(name='Combined_mesh',
+                                  mesh=Mesh())
+
+        num_layers = self.component_construction.layers.__len__()
+        for i, layer in enumerate(self.component_construction.layers):
+            if i == 0:
+                _ = [setattr(x, 'boundary', bottom_side_patch) for x in list(layer.meshes)[0].bottom_faces]
+
+            if i == num_layers - 1:
+                _ = [setattr(x, 'boundary', top_side_patch) for x in list(layer.meshes)[0].top_faces]
+            else:
+                top_mesh = list(layer.meshes)[0]
+
+                next_layer = self.component_construction.layers[i + 1]
+                if next_layer is self.pipe_layer:
+                    bottom_mesh = next(filter(lambda x: type(x) == LowerPipeLayerMesh, next_layer.meshes))
+                else:
+                    bottom_mesh = list(next_layer.meshes)[0]
+
+                add_face_contacts(top_mesh.top_faces,
+                                  bottom_mesh.bottom_faces,
+                                  top_mesh.mesh,
+                                  bottom_mesh.mesh,
+                                  f'{top_mesh.mesh.txt_id}_to_{bottom_mesh.mesh.txt_id}',
+                                  f'{bottom_mesh.mesh.txt_id}_to_{top_mesh.mesh.txt_id}')
+
+
     def update_boundary_conditions(self, faces=None):
 
         logger.info('Updating boundary conditions...')
@@ -625,48 +657,23 @@ class ActivatedReferenceFace(ReferenceFace):
             def add_pipe_layer_bcs(layer):
                 bottom_mesh = next(filter(lambda x: type(x) == LowerPipeLayerMesh, layer.meshes))
                 top_mesh = next(filter(lambda x: type(x) == UpperPipeLayerMesh, layer.meshes))
-                pipe_mesh = next(filter(lambda x: type(x) == PipeMesh, layer.meshes))
-                construction_mesh = next(filter(lambda x: type(x) == ConstructionMesh, layer.meshes))
+                pipe_layer_mesh = next(filter(lambda x: type(x) == PipeLayerMesh, layer.meshes))
 
-                # connect pipe_mesh with construction_mesh
-                add_face_contacts(construction_mesh.interfaces,
-                                  pipe_mesh.interfaces,
-                                  construction_mesh.mesh,
-                                  pipe_mesh.mesh,
-                                  f'{construction_mesh.mesh.txt_id}_to_{pipe_mesh.mesh.txt_id}',
-                                  f'{pipe_mesh.mesh.txt_id}_to_{construction_mesh.mesh.txt_id}')
-
-                # connect bottom_mesh with construction_mesh
+                # connect bottom_mesh with pipe_layer_mesh
                 add_face_contacts(bottom_mesh.top_faces,
-                                  construction_mesh.bottom_faces,
+                                  pipe_layer_mesh.bottom_faces,
                                   bottom_mesh.mesh,
-                                  construction_mesh.mesh,
-                                  f'{bottom_mesh.mesh.txt_id}_to_{construction_mesh.mesh.txt_id}',
-                                  f'{construction_mesh.mesh.txt_id}_to_{bottom_mesh.mesh.txt_id}')
-
-                # connect bottom_mesh with pipe_mesh
-                add_face_contacts(bottom_mesh.top_faces,
-                                  pipe_mesh.bottom_faces,
-                                  bottom_mesh.mesh,
-                                  pipe_mesh.mesh,
-                                  f'{bottom_mesh.mesh.txt_id}_to_{pipe_mesh.mesh.txt_id}',
-                                  f'{pipe_mesh.mesh.txt_id}_to_{pipe_mesh.mesh.txt_id}')
+                                  pipe_layer_mesh.mesh,
+                                  f'{bottom_mesh.mesh.txt_id}_to_{pipe_layer_mesh.mesh.txt_id}',
+                                  f'{pipe_layer_mesh.mesh.txt_id}_to_{bottom_mesh.mesh.txt_id}')
 
                 # connect top_mesh with construction_mesh
                 add_face_contacts(top_mesh.bottom_faces,
-                                  construction_mesh.top_faces,
+                                  pipe_layer_mesh.top_faces,
                                   top_mesh.mesh,
-                                  construction_mesh.mesh,
-                                  f'{top_mesh.mesh.txt_id}_to_{construction_mesh.mesh.txt_id}',
-                                  f'{construction_mesh.mesh.txt_id}_to_{top_mesh.mesh.txt_id}')
-
-                # connect top_mesh with pipe_mesh
-                add_face_contacts(top_mesh.bottom_faces,
-                                  pipe_mesh.top_faces,
-                                  top_mesh.mesh,
-                                  pipe_mesh.mesh,
-                                  f'{top_mesh.mesh.txt_id}_to_{pipe_mesh.mesh.txt_id}',
-                                  f'{pipe_mesh.mesh.txt_id}_to_{top_mesh.mesh.txt_id}')
+                                  pipe_layer_mesh.mesh,
+                                  f'{top_mesh.mesh.txt_id}_to_{pipe_layer_mesh.mesh.txt_id}',
+                                  f'{pipe_layer_mesh.mesh.txt_id}_to_{top_mesh.mesh.txt_id}')
 
             num_layers = self.component_construction.layers.__len__()
             for i, layer in enumerate(self.component_construction.layers):
@@ -690,7 +697,7 @@ class ActivatedReferenceFace(ReferenceFace):
                         top_mesh = next(filter(lambda x: type(x) == UpperPipeLayerMesh, layer.meshes))
                         _ = [setattr(x, 'boundary', top_side_patch) for x in top_mesh.top_faces]
                     else:
-                        _ = [setattr(x, 'boundary', bottom_side_patch) for x in list(layer.meshes)[0].top_faces]
+                        _ = [setattr(x, 'boundary', top_side_patch) for x in list(layer.meshes)[0].top_faces]
                 else:
                     # connect layer with next layer:
                     if is_pipe_layer:
@@ -702,10 +709,10 @@ class ActivatedReferenceFace(ReferenceFace):
                     if next_layer is self.pipe_layer:
                         bottom_mesh = next(filter(lambda x: type(x) == LowerPipeLayerMesh, next_layer.meshes))
                     else:
-                        bottom_mesh = list(layer.meshes)[0]
+                        bottom_mesh = list(next_layer.meshes)[0]
 
-                    add_face_contacts(top_mesh.bottom_faces,
-                                      bottom_mesh.top_faces,
+                    add_face_contacts(top_mesh.top_faces,
+                                      bottom_mesh.bottom_faces,
                                       top_mesh.mesh,
                                       bottom_mesh.mesh,
                                       f'{top_mesh.mesh.txt_id}_to_{bottom_mesh.mesh.txt_id}',

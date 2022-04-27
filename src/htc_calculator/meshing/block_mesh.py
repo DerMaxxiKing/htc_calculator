@@ -217,6 +217,8 @@ class Mesh(object, metaclass=MeshMetaMock):
                     del init_dict['id']
                     del init_dict['dict_id']
 
+                    init_dict['num_cells'] = init_dict['_num_cells']
+
                     init_dict['vertices'] = [v_lookup_dict[edge.vertices[0].id], v_lookup_dict[edge.vertices[1].id]]
                     init_dict['mesh'] = merged_mesh
                     in_mesh_edge = BlockMeshEdge(**init_dict)
@@ -254,6 +256,7 @@ class Mesh(object, metaclass=MeshMetaMock):
                             del init_dict[key]
 
                     init_dict['vertices'] = [v_lookup_dict[x.id] for x in instance.vertices]
+                    init_dict['num_cells'] = init_dict['_num_cells']
 
                     init_dict['edge0'] = e_lookup_dict[instance.edge0.id]
                     init_dict['edge1'] = e_lookup_dict[instance.edge1.id]
@@ -277,7 +280,7 @@ class Mesh(object, metaclass=MeshMetaMock):
 
                     init_dict['mesh'] = merged_mesh
 
-                    in_mesh_instances[ii] = BlockMeshFace(**init_dict)
+                    in_mesh_instances[ii] = Block(**init_dict)
 
                 return in_mesh_instances
 
@@ -290,10 +293,10 @@ class Mesh(object, metaclass=MeshMetaMock):
                         if key in init_dict.keys():
                             del init_dict[key]
 
-                    init_dict['faces'] = set([face_lookup_dict[x] for x in instance.faces])
+                    init_dict['faces'] = set([face_lookup_dict[x.id] for x in instance.faces])
                     init_dict['mesh'] = merged_mesh
 
-                    in_mesh_instances[ii] = BlockMeshFace(**init_dict)
+                    in_mesh_instances[ii] = BlockMeshBoundary(**init_dict)
 
                 return in_mesh_instances
 
@@ -765,7 +768,7 @@ class BoundaryMetaMock(type):
 
         in_mesh_instances = [None] * instances.__len__()
         for ii, instance in enumerate(instances):
-            if instances.id in instance_ids.keys():
+            if instance in instance_ids.keys():
                 in_mesh_instance = instance
                 in_mesh_instances[ii] = in_mesh_instance
             else:
@@ -775,7 +778,7 @@ class BoundaryMetaMock(type):
                     if key in init_dict.keys():
                         del init_dict[key]
 
-                init_dict['faces'] = BlockMeshFace.copy_to_mesh(instance.faces)
+                init_dict['faces'] = set()
 
                 init_dict['mesh'] = mesh
                 in_mesh_instance = cls(**init_dict)
@@ -1357,7 +1360,8 @@ class ParallelEdgesSet(object, metaclass=ParallelEdgeSetMetaMock):
     @property
     def num_cells(self):
         if self._num_cells is None:
-            fixed_num_cells = [x.num_cells for x in self.edges if x.fixed_num_cells]
+            fixed_num_cells = [x.num_cells for x in self.edges if (x.fixed_num_cells and (x.num_cells is not None))]
+
             if fixed_num_cells:
                 self._num_cells = min(fixed_num_cells)
             else:
@@ -1780,6 +1784,14 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
         _ = self.edges
 
     @property
+    def face_pos(self):
+        return tuple(sorted(self.vertices))
+
+    @property
+    def face_vertex_pos(self):
+        return tuple(tuple(x.position) for x in sorted(self.vertices))
+
+    @property
     def plane(self):
         if self._plane is None:
             pts_set = list(set(self.vertices))
@@ -1837,6 +1849,8 @@ class BlockMeshFace(object, metaclass=FaceMetaMock):
     @boundary.setter
     def boundary(self, value: BlockMeshBoundary):
         if not value == self._boundary:
+            if value.mesh != self.mesh:
+                value = BlockMeshBoundary.copy_to_mesh(value, self.mesh)
             value.add_face(self)
         self._boundary = value
 
@@ -2437,12 +2451,12 @@ class Block(object, metaclass=BlockMetaMock):
         """
 
         self._vertices = None
-        self._num_cells = None
+        self._num_cells = kwargs.get('_num_cells', None)
         self._block_edges = None
         self._fc_solid = None
         self._faces = None
         self._edge = None
-        self._dirty_center = None
+        self._dirty_center = kwargs.get('_dirty_center', None)
 
         self._merge_patch_pairs = False
         self._duplicate = False
@@ -3347,6 +3361,7 @@ class BlockMesh(object):
 
     @classmethod
     def join_meshes(cls, meshes, mesh_name):
+
         logger.info(f'Joining block meshes {[x.name for x in meshes]}')
 
         join_meshes = [x.mesh for x in meshes]
@@ -3355,9 +3370,6 @@ class BlockMesh(object):
         top_faces = [[face_lookup_dict[y.id] for y in x.top_faces] for x in meshes]
         bottom_faces = [[face_lookup_dict[y.id] for y in x.bottom_faces] for x in meshes]
         interfaces = [[face_lookup_dict[y.id] for y in x.interfaces] for x in meshes]
-
-        # add cyclicAMI at interfaces:
-
 
         merged_block_mesh = cls(
             name='Block Mesh ' + mesh_name,
@@ -3368,7 +3380,7 @@ class BlockMesh(object):
 
         logger.info(f'Successfully joined block meshes {[x.name for x in meshes]}')
 
-        return merged_block_mesh
+        return merged_block_mesh, face_lookup_dict
 
     @classmethod
     def add_mesh_contacts(cls, block_meshes):
@@ -3507,7 +3519,7 @@ class BlockMesh(object):
         self._case_dir = value
 
     def init_case(self):
-        logger.info('Initializing case...')
+        logger.info(f'Initializing Block Mesh in {self.case_dir}')
 
         os.makedirs(self.case_dir, exist_ok=True)
         os.makedirs(os.path.join(self.case_dir, '0'), exist_ok=True)
@@ -3539,10 +3551,20 @@ class BlockMesh(object):
 
     def create_block_mesh_dict(self):
 
+        def extend(a):
+            out = []
+            for sublist in a:
+                if isinstance(sublist, list):
+                    out.extend(sublist)
+                else:
+                    out.append(sublist)
+            return out
+
         if self.mesh is not None:
             self.mesh.activate()
-            vertices = self.mesh.vertices.values()
-            edges = self.mesh.edges.values()
+
+            vertices = extend(self.mesh.vertices.values())
+            edges = extend(self.mesh.edges.values())
             blocks = self.mesh.blocks
             boundaries = self.mesh.boundaries
             patch_pairs = self.mesh.patch_pairs
@@ -3550,14 +3572,15 @@ class BlockMesh(object):
             _ = [pe_sets.update(x.parallel_edges_sets) for x in blocks]
 
         else:
-            vertices = BlockMeshVertex.instances.values()
-            edges = BlockMeshEdge.instances.values()
+            vertices = extend(BlockMeshVertex.instances.values())
+            edges = extend(BlockMeshEdge.instances.values())
             blocks = Block.instances
             pe_sets = ParallelEdgesSet.instances
             boundaries = BlockMeshBoundary.instances
             patch_pairs =PatchPair.instances
 
             # contacts = CompBlock.search_merge_patch_pairs()
+        logger.info(f'Updating parallel edges')
         Block.update_parallel_edges(blocks=blocks)
         ParallelEdgesSet.merge_sets(pe_sets=pe_sets)
 
@@ -3786,7 +3809,9 @@ class BlockMesh(object):
                 logger.error(f'Error Creating block mesh:\n\n{output}')
                 raise Exception(f'Error Creating block mesh:\n\n{output}')
 
-            logger.info(f"Successfully created block mesh: \n\n {output[output.find('Mesh Information'):]}")
+            logger.info(f"Successfully created block mesh:\n"
+                        f"Directory: {case_dir}\n\n "
+                        f"{output[output.find('Mesh Information'):]}")
 
             if run_parafoam:
                 self.run_parafoam(case_dir=case_dir)
@@ -3821,6 +3846,10 @@ class UpperPipeLayerMesh(BlockMesh):
 
 
 class LowerPipeLayerMesh(BlockMesh):
+    pass
+
+
+class PipeLayerMesh(BlockMesh):
     pass
 
 
