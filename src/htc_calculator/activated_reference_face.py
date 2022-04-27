@@ -592,8 +592,8 @@ class ActivatedReferenceFace(ReferenceFace):
     def combine_meshes(self):
         logger.info('Joining layer meshes...')
 
-        combined_mesh = BlockMesh(name='Combined_mesh',
-                                  mesh=Mesh())
+        combined_mesh = BlockMesh(name='Combined Block Mesh',
+                                  mesh=Mesh(name='Combined Mesh'))
 
         num_layers = self.component_construction.layers.__len__()
         for i, layer in enumerate(self.component_construction.layers):
@@ -617,7 +617,6 @@ class ActivatedReferenceFace(ReferenceFace):
                                   bottom_mesh.mesh,
                                   f'{top_mesh.mesh.txt_id}_to_{bottom_mesh.mesh.txt_id}',
                                   f'{bottom_mesh.mesh.txt_id}_to_{top_mesh.mesh.txt_id}')
-
 
     def update_boundary_conditions(self, faces=None):
 
