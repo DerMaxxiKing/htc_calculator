@@ -163,13 +163,19 @@ class PipeSection(object):
                            *connect_edges]
 
             n_cell = copy.deepcopy(self.n_cell)
+
+            if type(edge.Curve) is FCPart.Line:
+                cell_multiplier = 1
+            else:
+                cell_multiplier = 2
+
             if None in n_cell:
                 if n_cell[0] is None:
-                    n_cell[0] = int(np.ceil(block_edges[0].length / self.cell_size[0]))
+                    n_cell[0] = int(np.ceil(block_edges[0].length / self.cell_size[0])) * cell_multiplier
                 if n_cell[1] is None:
-                    n_cell[1] = int(np.ceil(block_edges[3].length / self.cell_size[1]))
+                    n_cell[1] = int(np.ceil(block_edges[3].length / self.cell_size[1])) * cell_multiplier
                 if n_cell[2] is None:
-                    n_cell[2] = int(np.ceil(edge.Length / self.cell_size[2]))
+                    n_cell[2] = int(np.ceil(edge.Length / self.cell_size[2])) * cell_multiplier
 
             # top / bottom side
             pipe_layer_top = i in self.top_side.keys()

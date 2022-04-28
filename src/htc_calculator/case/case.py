@@ -9,7 +9,7 @@ from re import findall, MULTILINE
 from ..config import work_dir
 from ..logger import logger
 from ..meshing.block_mesh import BlockMesh, inlet_patch, outlet_patch, wall_patch, pipe_wall_patch, top_side_patch, \
-    bottom_side_patch, CellZone, BlockMeshBoundary, Mesh, CreatePatchDict, export_objects, add_face_contacts, PipeLayerMesh
+    bottom_side_patch, CellZone, BlockMeshBoundary, Mesh, CreatePatchDict, export_objects, add_face_contacts, PipeLayerMesh, CyclicAMI
 from ..construction import write_region_properties, Fluid, Solid
 from .boundary_conditions.user_bcs import SolidFluidInterface, FluidSolidInterface
 from .. import config
@@ -24,6 +24,9 @@ except ImportError:
     import importlib_resources as pkg_resources
 
 from . import case_resources
+
+# import FreeCAD
+# import Part as FCPart
 
 
 class TabsBC(object):
@@ -62,6 +65,7 @@ class OFCase(object):
 
         self._case_dir = None
         self._block_mesh = None
+        self._combined_mesh = None
 
         self._control_dict = None
         self._decompose_par_dict = None
@@ -78,6 +82,7 @@ class OFCase(object):
         self.create_patch_dict = kwargs.get('create_patch_dict', CreatePatchDict(case_dir=self.case_dir))
 
         self.function_objects = FOMetaMock.instances
+        self.combined_mesh = kwargs.get('combined_mesh', None)
 
     @property
     def n_proc(self):
@@ -96,6 +101,16 @@ class OFCase(object):
             self._block_mesh = BlockMesh(name=self.name,
                                          case_dir=self.case_dir)
         return self._block_mesh
+
+    @property
+    def combined_mesh(self):
+        if self._combined_mesh is None:
+            self._combined_mesh = self.combine_mesh()
+        return self._combined_mesh
+
+    @combined_mesh.setter
+    def combined_mesh(self, value):
+        self._combined_mesh = value
 
     @property
     def case_dir(self):
@@ -347,6 +362,34 @@ class OFCase(object):
         control_dict = control_dict.replace('<function_objects>', fo_dict_entry)
         self.control_dict = control_dict
 
+    def combine_mesh(self):
+        # _ = self.reference_face.pipe_comp_blocks
+        # _ = self.reference_face.free_comp_blocks
+        # # export_objects([self.reference_face.free_comp_blocks.fc_solid], '/tmp/free_comp_blocks.FCStd')
+        # _ = self.reference_face.layer_meshes
+        #
+        # joined_pipe_layer_mesh, face_lookup_dict = PipeLayerMesh.join_meshes(
+        #     [self.reference_face.pipe_mesh,
+        #      self.reference_face.construction_mesh],
+        #     'joined_pipe_layer_mesh',
+        # )
+        # self.reference_face.pipe_layer.meshes.remove(self.reference_face.pipe_mesh)
+        # self.reference_face.pipe_layer.meshes.remove(self.reference_face.construction_mesh)
+        # self.reference_face.pipe_layer.meshes.add(joined_pipe_layer_mesh)
+        #
+        # # add cyclicAMI at interfaces:
+        # add_face_contacts([face_lookup_dict[x.id] for x in self.reference_face.pipe_mesh.interfaces],
+        #                   [face_lookup_dict[x.id] for x in self.reference_face.construction_mesh.interfaces],
+        #                   joined_pipe_layer_mesh.mesh,
+        #                   joined_pipe_layer_mesh.mesh,
+        #                   f'pipe_mesh_to_construction_mesh',
+        #                   f'construction_mesh_to_pipe_mesh'
+        #                   )
+
+        combined_mesh = self.reference_face.combine_meshes()
+
+        return combined_mesh
+
     def run(self):
 
         _ = self.reference_face.pipe_comp_blocks
@@ -421,61 +464,86 @@ class OFCase(object):
         logger.debug('bla bla')
 
     def run_with_separate_meshes(self):
-        _ = self.reference_face.pipe_comp_blocks
-        _ = self.reference_face.free_comp_blocks
-        # export_objects([self.reference_face.free_comp_blocks.fc_solid], '/tmp/free_comp_blocks.FCStd')
-        _ = self.reference_face.layer_meshes
-        # _ = self.reference_face.extruded_comp_blocks
+        # _ = self.reference_face.pipe_comp_blocks
+        # _ = self.reference_face.free_comp_blocks
+        # # export_objects([self.reference_face.free_comp_blocks.fc_solid], '/tmp/free_comp_blocks.FCStd')
+        # _ = self.reference_face.layer_meshes
+        # # _ = self.reference_face.extruded_comp_blocks
+        #
+        # joined_pipe_layer_mesh, face_lookup_dict = PipeLayerMesh.join_meshes(
+        #     [self.reference_face.pipe_mesh,
+        #      self.reference_face.construction_mesh],
+        #     'joined_pipe_layer_mesh',
+        # )
+        # self.reference_face.pipe_layer.meshes.remove(self.reference_face.pipe_mesh)
+        # self.reference_face.pipe_layer.meshes.remove(self.reference_face.construction_mesh)
+        # self.reference_face.pipe_layer.meshes.add(joined_pipe_layer_mesh)
+        #
+        # # add cyclicAMI at interfaces:
+        # add_face_contacts([face_lookup_dict[x.id] for x in self.reference_face.pipe_mesh.interfaces],
+        #                   [face_lookup_dict[x.id] for x in self.reference_face.construction_mesh.interfaces],
+        #                   joined_pipe_layer_mesh.mesh,
+        #                   joined_pipe_layer_mesh.mesh,
+        #                   f'pipe_mesh_to_construction_mesh',
+        #                   f'construction_mesh_to_pipe_mesh'
+        #                   )
+        #
+        # combined_mesh = self.reference_face.combine_meshes()
 
-        joined_pipe_layer_mesh, face_lookup_dict = PipeLayerMesh.join_meshes(
-            [self.reference_face.pipe_mesh,
-             self.reference_face.construction_mesh],
-            'joined_pipe_layer_mesh',
-        )
-        self.reference_face.pipe_layer.meshes.remove(self.reference_face.pipe_mesh)
-        self.reference_face.pipe_layer.meshes.remove(self.reference_face.construction_mesh)
-        self.reference_face.pipe_layer.meshes.add(joined_pipe_layer_mesh)
+        self.reference_face.update_cell_zone(blocks=self.combined_mesh.mesh.blocks)
+        # self.reference_face.update_boundary_conditions(self.combined_mesh)
 
-        # add cyclicAMI at interfaces:
-        add_face_contacts([face_lookup_dict[x.id] for x in self.reference_face.pipe_mesh.interfaces],
-                          [face_lookup_dict[x.id] for x in self.reference_face.construction_mesh.interfaces],
-                          joined_pipe_layer_mesh.mesh,
-                          joined_pipe_layer_mesh.mesh,
-                          f'pipe_mesh_to_construction_mesh',
-                          f'construction_mesh_to_pipe_mesh'
-                          )
+        logger.info('Updating boundary conditions...')
+        _ = [setattr(x, 'boundary', bottom_side_patch) for x in self.combined_mesh.bottom_faces]
+        _ = [setattr(x, 'boundary', top_side_patch) for x in self.combined_mesh.top_faces]
 
-        combined_mesh = self.reference_face.combine_meshes()
+        hull_faces = [x for x in self.combined_mesh.mesh.faces.values() if (x.blocks.__len__() < 2)]
+        wall_faces = [x for x in hull_faces if x.boundary is None]
 
-        logger.info('Adding cyclicAMI boundary condition to mesh interfaces')
-        block_meshes = [joined_pipe_layer_mesh,
-                        *self.reference_face.layer_meshes]
+        # export_objects([FCPart.Compound([x.fc_face for x in wall_faces])], '/tmp/wall_faces.FCStd')
+        # export_objects([FCPart.Compound([x.fc_face for x in
+        #                                  [*self.combined_mesh.bottom_faces, *self.combined_mesh.top_faces]])], '/tmp/top_bottom.FCStd')
 
-        blocks = []
-        _ = [blocks.extend(x.mesh.blocks) for x in block_meshes]
-        self.reference_face.update_cell_zone(blocks=blocks)
-        self.reference_face.update_boundary_conditions()
+        _ = [x.set_boundary(wall_patch) for x in wall_faces]
 
-        for block_mesh in block_meshes:
-            block_mesh.init_case()
-            block_mesh.run_block_mesh(run_parafoam=True)
+        self.combined_mesh.init_case()
+        self.combined_mesh.run_block_mesh(run_parafoam=True)
 
-        # create empty case
+        self.create_patch_dict.boundaries = [x for x in self.combined_mesh.mesh.boundaries.values() if (type(x) is CyclicAMI)]
+        self.create_patch_dict.case_dir = self.combined_mesh.case_dir
+        self.create_patch_dict.write_create_patch_dict()
+        self.create_patch_dict.run()
 
-        for mesh in block_meshes[1:]:
-            block_meshes[0].merge_mesh(mesh)
 
-        block_meshes = []
-        for key, mesh in Mesh.instances.items():
-            if 0 in [mesh.vertices.__len__(), mesh.blocks.__len__()]:
-                continue
-
-            mesh.activate()
-            block_mesh = BlockMesh(name='Block Mesh ' + mesh.name,
-                                   case_dir=os.path.join(self.default_path, mesh.txt_id),
-                                   mesh=mesh)
-            block_meshes.append(block_mesh)
-            block_mesh.init_case()
-            block_mesh.run_block_mesh(run_parafoam=True)
-
-        print('done')
+        # logger.info('Adding cyclicAMI boundary condition to mesh interfaces')
+        # block_meshes = [joined_pipe_layer_mesh,
+        #                 *self.reference_face.layer_meshes]
+        #
+        # blocks = []
+        # _ = [blocks.extend(x.mesh.blocks) for x in block_meshes]
+        # self.reference_face.update_cell_zone(blocks=blocks)
+        # self.reference_face.update_boundary_conditions()
+        #
+        # for block_mesh in block_meshes:
+        #     block_mesh.init_case()
+        #     block_mesh.run_block_mesh(run_parafoam=True)
+        #
+        # # create empty case
+        #
+        # for mesh in block_meshes[1:]:
+        #     block_meshes[0].merge_mesh(mesh)
+        #
+        # block_meshes = []
+        # for key, mesh in Mesh.instances.items():
+        #     if 0 in [mesh.vertices.__len__(), mesh.blocks.__len__()]:
+        #         continue
+        #
+        #     mesh.activate()
+        #     block_mesh = BlockMesh(name='Block Mesh ' + mesh.name,
+        #                            case_dir=os.path.join(self.default_path, mesh.txt_id),
+        #                            mesh=mesh)
+        #     block_meshes.append(block_mesh)
+        #     block_mesh.init_case()
+        #     block_mesh.run_block_mesh(run_parafoam=True)
+        #
+        # print('done')

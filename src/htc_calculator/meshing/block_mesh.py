@@ -418,6 +418,7 @@ class Mesh(object, metaclass=MeshMetaMock):
                 init_dict['mesh'] = self
 
                 in_mesh_instances[ii] = BlockMeshBoundary(**init_dict)
+                _ = [x.set_boundary(in_mesh_instances[ii]) for x in init_dict['faces']]
 
             return in_mesh_instances
 
@@ -1685,6 +1686,11 @@ class CyclicAMI(BlockMeshBoundary):
 
     def __init__(self, *args, **kwargs):
         BlockMeshBoundary.__init__(self, *args, **kwargs)
+
+        faces = kwargs.get('faces', None)
+        if faces is not None:
+            _ = [x.set_boundary(self) for x in faces]
+
         self.neighbour_patch = kwargs.get('neighbour_patch', None)
         self.type = 'patch'
         self.transform = kwargs.get('transform', 'none')
@@ -2584,25 +2590,45 @@ class Block(object, metaclass=BlockMetaMock):
         self._original = None
         self._duplicated_block = None
 
-        self._face0 = kwargs.get('face0', None)
-        self._face1 = kwargs.get('face1', None)
-        self._face2 = kwargs.get('face2', None)
-        self._face3 = kwargs.get('face3', None)
-        self._face4 = kwargs.get('face4', None)
-        self._face5 = kwargs.get('face5', None)
+        self._face0 = None
+        self._face1 = None
+        self._face2 = None
+        self._face3 = None
+        self._face4 = None
+        self._face5 = None
 
-        self._edge0 = kwargs.get('edge0', None)
-        self._edge1 = kwargs.get('edge1', None)
-        self._edge2 = kwargs.get('edge2', None)
-        self._edge3 = kwargs.get('edge3', None)
-        self._edge4 = kwargs.get('edge4', None)
-        self._edge5 = kwargs.get('edge5', None)
-        self._edge6 = kwargs.get('edge6', None)
-        self._edge7 = kwargs.get('edge7', None)
-        self._edge8 = kwargs.get('edge8', None)
-        self._edge9 = kwargs.get('edge9', None)
-        self._edge10 = kwargs.get('edge10', None)
-        self._edge11 = kwargs.get('edge11', None)
+        self._edge0 = None
+        self._edge1 = None
+        self._edge2 = None
+        self._edge3 = None
+        self._edge4 = None
+        self._edge5 = None
+        self._edge6 = None
+        self._edge7 = None
+        self._edge8 = None
+        self._edge9 = None
+        self._edge10 = None
+        self._edge11 = None
+
+        self.face0 = kwargs.get('face0', None)
+        self.face1 = kwargs.get('face1', None)
+        self.face2 = kwargs.get('face2', None)
+        self.face3 = kwargs.get('face3', None)
+        self.face4 = kwargs.get('face4', None)
+        self.face5 = kwargs.get('face5', None)
+
+        self.edge0 = kwargs.get('edge0', None)
+        self.edge1 = kwargs.get('edge1', None)
+        self.edge2 = kwargs.get('edge2', None)
+        self.edge3 = kwargs.get('edge3', None)
+        self.edge4 = kwargs.get('edge4', None)
+        self.edge5 = kwargs.get('edge5', None)
+        self.edge6 = kwargs.get('edge6', None)
+        self.edge7 = kwargs.get('edge7', None)
+        self.edge8 = kwargs.get('edge8', None)
+        self.edge9 = kwargs.get('edge9', None)
+        self.edge10 = kwargs.get('edge10', None)
+        self.edge11 = kwargs.get('edge11', None)
 
         self.name = kwargs.get('name', 'unnamed_block')
         self.id = next(Block.id_iter)
@@ -2757,7 +2783,14 @@ class Block(object, metaclass=BlockMetaMock):
 
     @face0.setter
     def face0(self, value):
+        if self._face0 is not None:
+            try:
+                self._face0.blocks.remove(self)
+            except Exception as e:
+                pass
         self._face0 = value
+        if value is not None:
+            self._face0.blocks.add(self)
 
     @property
     def face1(self):
@@ -2769,7 +2802,13 @@ class Block(object, metaclass=BlockMetaMock):
 
     @face1.setter
     def face1(self, value):
+        try:
+            self._face1.blocks.remove(self)
+        except Exception as e:
+            pass
         self._face1 = value
+        if value is not None:
+            self._face1.blocks.add(self)
 
     @property
     def face2(self):
@@ -2787,7 +2826,13 @@ class Block(object, metaclass=BlockMetaMock):
 
     @face2.setter
     def face2(self, value):
+        try:
+            self._face2.blocks.remove(self)
+        except Exception as e:
+            pass
         self._face2 = value
+        if value is not None:
+            self._face2.blocks.add(self)
 
     @property
     def face3(self):
@@ -2805,7 +2850,13 @@ class Block(object, metaclass=BlockMetaMock):
 
     @face3.setter
     def face3(self, value):
+        try:
+            self._face3.blocks.remove(self)
+        except Exception as e:
+            pass
         self._face3 = value
+        if value is not None:
+            self._face3.blocks.add(self)
 
     @property
     def face4(self):
@@ -2823,7 +2874,13 @@ class Block(object, metaclass=BlockMetaMock):
 
     @face4.setter
     def face4(self, value):
+        try:
+            self._face4.blocks.remove(self)
+        except Exception as e:
+            pass
         self._face4 = value
+        if value is not None:
+            self._face4.blocks.add(self)
 
     @property
     def face5(self):
@@ -2841,7 +2898,13 @@ class Block(object, metaclass=BlockMetaMock):
 
     @face5.setter
     def face5(self, value):
+        try:
+            self._face5.blocks.remove(self)
+        except Exception as e:
+            pass
         self._face5 = value
+        if value is not None:
+            self._face5.blocks.add(self)
 
     @property
     def faces(self):
@@ -2876,6 +2939,16 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge0.blocks.add(self)
         return self._edge0
 
+    @edge0.setter
+    def edge0(self, value):
+        try:
+            self._edge0.blocks.remove(self)
+        except Exception as e:
+            pass
+        self._edge0 = value
+        if value is not None:
+            self._edge0.blocks.add(self)
+
     @property
     def edge1(self):
         if self._edge1 is None:
@@ -2885,6 +2958,16 @@ class Block(object, metaclass=BlockMetaMock):
                                                  create=True)
             self._edge1.blocks.add(self)
         return self._edge1
+
+    @edge1.setter
+    def edge1(self, value):
+        try:
+            self._edge1.blocks.remove(self)
+        except Exception as e:
+            pass
+        self._edge1 = value
+        if value is not None:
+            self._edge1.blocks.add(self)
 
     @property
     def edge2(self):
@@ -2896,6 +2979,16 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge2.blocks.add(self)
         return self._edge2
 
+    @edge2.setter
+    def edge2(self, value):
+        try:
+            self._edge2.blocks.remove(self)
+        except Exception as e:
+            pass
+        self._edge2 = value
+        if value is not None:
+            self._edge2.blocks.add(self)
+
     @property
     def edge3(self):
         if self._edge3 is None:
@@ -2905,6 +2998,16 @@ class Block(object, metaclass=BlockMetaMock):
                                                  create=True)
             self._edge3.blocks.add(self)
         return self._edge3
+
+    @edge3.setter
+    def edge3(self, value):
+        try:
+            self._edge3.blocks.remove(self)
+        except Exception as e:
+            pass
+        self._edge3 = value
+        if value is not None:
+            self._edge3.blocks.add(self)
 
     @property
     def edge4(self):
@@ -2916,6 +3019,16 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge4.blocks.add(self)
         return self._edge4
 
+    @edge4.setter
+    def edge4(self, value):
+        try:
+            self._edge4.blocks.remove(self)
+        except Exception as e:
+            pass
+        self._edge4 = value
+        if value is not None:
+            self._edge4.blocks.add(self)
+
     @property
     def edge5(self):
         if self._edge5 is None:
@@ -2925,6 +3038,16 @@ class Block(object, metaclass=BlockMetaMock):
                                                  create=True)
             self._edge5.blocks.add(self)
         return self._edge5
+
+    @edge5.setter
+    def edge5(self, value):
+        try:
+            self._edge5.blocks.remove(self)
+        except Exception as e:
+            pass
+        self._edge5 = value
+        if value is not None:
+            self._edge5.blocks.add(self)
 
     @property
     def edge6(self):
@@ -2936,6 +3059,16 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge6.blocks.add(self)
         return self._edge6
 
+    @edge6.setter
+    def edge6(self, value):
+        try:
+            self._edge6.blocks.remove(self)
+        except Exception as e:
+            pass
+        self._edge6 = value
+        if value is not None:
+            self._edge6.blocks.add(self)
+
     @property
     def edge7(self):
         if self._edge7 is None:
@@ -2945,6 +3078,16 @@ class Block(object, metaclass=BlockMetaMock):
                                                  create=True)
             self._edge7.blocks.add(self)
         return self._edge7
+
+    @edge7.setter
+    def edge7(self, value):
+        try:
+            self._edge7.blocks.remove(self)
+        except Exception as e:
+            pass
+        self._edge7 = value
+        if value is not None:
+            self._edge7.blocks.add(self)
 
     @property
     def edge8(self):
@@ -2956,6 +3099,16 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge8.blocks.add(self)
         return self._edge8
 
+    @edge8.setter
+    def edge8(self, value):
+        try:
+            self._edge8.blocks.remove(self)
+        except Exception as e:
+            pass
+        self._edge8 = value
+        if value is not None:
+            self._edge8.blocks.add(self)
+
     @property
     def edge9(self):
         if self._edge9 is None:
@@ -2965,6 +3118,16 @@ class Block(object, metaclass=BlockMetaMock):
                                                  create=True)
             self._edge9.blocks.add(self)
         return self._edge9
+
+    @edge9.setter
+    def edge9(self, value):
+        try:
+            self._edge9.blocks.remove(self)
+        except Exception as e:
+            pass
+        self._edge9 = value
+        if value is not None:
+            self._edge9.blocks.add(self)
 
     @property
     def edge10(self):
@@ -2976,6 +3139,16 @@ class Block(object, metaclass=BlockMetaMock):
             self._edge10.blocks.add(self)
         return self._edge10
 
+    @edge10.setter
+    def edge10(self, value):
+        try:
+            self._edge10.blocks.remove(self)
+        except Exception as e:
+            pass
+        self._edge10 = value
+        if value is not None:
+            self._edge10.blocks.add(self)
+
     @property
     def edge11(self):
         if self._edge11 is None:
@@ -2985,6 +3158,16 @@ class Block(object, metaclass=BlockMetaMock):
                                                   create=True)
             self._edge11.blocks.add(self)
         return self._edge11
+
+    @edge11.setter
+    def edge11(self, value):
+        try:
+            self._edge11.blocks.remove(self)
+        except Exception as e:
+            pass
+        self._edge11 = value
+        if value is not None:
+            self._edge11.blocks.add(self)
 
     @property
     def block_edges(self):

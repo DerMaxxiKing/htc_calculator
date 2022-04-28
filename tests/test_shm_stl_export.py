@@ -12,7 +12,7 @@ logger.setLevel('INFO')
 config.n_proc = 8
 
 pipe_section.materials = [water, aluminium]
-pipe_section.cell_size = [None, None, 100]
+pipe_section.cell_size = [None, None, 75]
 pipe_section.n_cell = [5, 5, None]
 
 # vertices = np.array([[0, 0, 0],
