@@ -57,7 +57,9 @@ class BCFile(object):
                 patches_str = ''
                 for patch, value in self.patches.items():
                     try:
-                        patches_str = patches_str + f'{patch}\n' + value.generate_dict_entry() + '\n'
+                        dict_entry = value.generate_dict_entry()
+                        if dict_entry is not None:
+                            patches_str = patches_str + f'{patch}\n' + value.generate_dict_entry() + '\n'
                     except Exception as e:
                         raise e
                 template = template.replace('<patches>', patches_str)
@@ -250,12 +252,20 @@ class InletOutlet(BoundaryCondition):
 
 class CyclicAMI(BoundaryCondition):
 
+    # template = cleandoc("""
+    #     {
+    #         type            cyclicAMI;
+    #         value           <value>;
+    #     }
+    #     """)
+
     template = cleandoc("""
-        {
-            type            cyclicAMI;
-            value           <value>;
-        }
-        """)
+    {
+        type            compressible::turbulentTemperatureCoupledBaffleMixed;
+        value           $internalField;
+        Tnbr            T;
+    }
+    """)
 
     def __init__(self, *args, **kwargs):
         """
@@ -269,5 +279,10 @@ class CyclicAMI(BoundaryCondition):
 
     def generate_dict_entry(self, *args, **kwargs):
         template = deepcopy(self.template)
-        template = template.replace('<value>', str(self.value))
         return template
+
+        # return None
+
+        # template = deepcopy(self.template)
+        # template = template.replace('<value>', str(self.value))
+        # return template

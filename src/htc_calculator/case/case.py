@@ -10,6 +10,7 @@ from ..config import work_dir
 from ..logger import logger
 from ..meshing.block_mesh import BlockMesh, inlet_patch, outlet_patch, wall_patch, pipe_wall_patch, top_side_patch, \
     bottom_side_patch, CellZone, BlockMeshBoundary, Mesh, CreatePatchDict, export_objects, add_face_contacts, PipeLayerMesh, CyclicAMI
+from .function_objects.function_object import PressureDifferencePatch, TemperatureDifferencePatch, WallHeatFlux
 from ..construction import write_region_properties, Fluid, Solid
 from .boundary_conditions.user_bcs import SolidFluidInterface, FluidSolidInterface
 from .. import config
@@ -352,11 +353,15 @@ class OFCase(object):
             logger.error(f"{res.stderr.decode('ascii')}")
         return True
 
-    def add_function_objects(self):
+    def add_function_objects(self, mesh=None):
+
+        if mesh is None:
+            mesh = FOMetaMock.current_mesh
+
         control_dict = pkg_resources.read_text(case_resources, 'controlDict')
 
         fo_dict_entry = ''
-        for fo in FOMetaMock.instances:
+        for fo in mesh.function_objects:
             fo_dict_entry += fo.dict_entry + '\n'
 
         control_dict = control_dict.replace('<function_objects>', fo_dict_entry)
@@ -519,10 +524,10 @@ class OFCase(object):
         write_region_properties(cell_zones, self.case_dir)
 
         self.combined_mesh.run_block_mesh(run_parafoam=True)
-        self.create_patch_dict.boundaries = [x for x in self.combined_mesh.mesh.boundaries.values() if (type(x) is CyclicAMI)]
-        self.create_patch_dict.case_dir = self.combined_mesh.case_dir
-        self.create_patch_dict.write_create_patch_dict()
-        self.create_patch_dict.run()
+        # self.create_patch_dict.boundaries = [x for x in self.combined_mesh.mesh.boundaries.values() if (type(x) is CyclicAMI)]
+        # self.create_patch_dict.case_dir = self.combined_mesh.case_dir
+        # self.create_patch_dict.write_create_patch_dict()
+        # self.create_patch_dict.run()
 
         self.run_split_mesh_regions()
         self.run_parafoam()
@@ -567,14 +572,32 @@ class OFCase(object):
                     boundary.case = self
                     boundary.cell_zone = cell_zone
 
+                WallHeatFlux(name=f'Wall Heat Flux on {boundary.name}',
+                             cell_zone=cell_zone,
+                             mesh=self.combined_mesh,
+                             patches=[boundary])
+
                 boundaries.append(boundary)
 
             cell_zone.boundaries = boundaries
             cell_zone.update_bcs()
             cell_zone.write_bcs(self.case_dir)
+            logger.debug(f'Wrote boundary condition for cell zone {cell_zone}')
 
-        self.add_function_objects()
+        # add function objects:
+        PressureDifferencePatch(patch1=self.combined_mesh.mesh.boundaries['inlet'],
+                                patch2=self.combined_mesh.mesh.boundaries['outlet'],
+                                mesh=self.combined_mesh.mesh,
+                                name='Pressure Difference Patch')
+
+        TemperatureDifferencePatch(patch1=self.combined_mesh.mesh.boundaries['inlet'],
+                                   patch2=self.combined_mesh.mesh.boundaries['outlet'],
+                                   mesh=self.combined_mesh.mesh,
+                                   name='Pressure Difference Patch')
+
+        self.add_function_objects(mesh=self.combined_mesh.mesh)
         self.write_control_dict()
+        self.write_decompose_par_dict()
         self.run_decompose_par()
 
         logger.debug('bla bla')

@@ -15,7 +15,7 @@ from ..geo_tools import search_contacts, surfaces_in_contact, get_position
 from ..construction import Solid, Fluid
 from ..case.boundary_conditions import *
 from ..case.boundary_conditions.user_bcs import *
-from ..case.function_objects import WallHeatFlux, PressureDifferencePatch, TemperatureDifferencePatch
+from ..case.function_objects import WallHeatFlux, PressureDifferencePatch, TemperatureDifferencePatch, FOMetaMock
 # import trimesh
 
 import FreeCAD
@@ -101,6 +101,8 @@ class Mesh(object, metaclass=MeshMetaMock):
         self.cell_zone_ids = kwargs.get('cell_zone_ids', {})
         self.comp_blocks = kwargs.get('comp_blocks', [])
         self.mesh_contacts = kwargs.get('mesh_contacts', {})
+        self.function_objects = kwargs.get('function_objects', [])
+        self.function_object_ids = kwargs.get('function_object_ids', {})
 
         self.vertex_id_counter = CustomID()
         self.edge_id_counter = CustomID()
@@ -143,6 +145,7 @@ class Mesh(object, metaclass=MeshMetaMock):
         BlockMetaMock.current_mesh = self
         CellZoneMetaMock.current_mesh = self
         CompBlockMetaMock.current_mesh = self
+        FOMetaMock.current_mesh = self
 
     @property
     def txt_id(self):
@@ -420,6 +423,8 @@ class Mesh(object, metaclass=MeshMetaMock):
 
                 in_mesh_instances[ii] = BlockMeshBoundary(**init_dict)
                 _ = [x.set_boundary(in_mesh_instances[ii]) for x in init_dict['faces']]
+                if instance.function_objects:
+                    in_mesh_instances[ii].function_objects = copy.deepcopy(instance.function_objects)
 
             return in_mesh_instances
 
@@ -915,6 +920,24 @@ class BoundaryMetaMock(type):
                 init_dict['mesh'] = mesh
                 in_mesh_instance = cls(**init_dict)
                 in_mesh_instances[ii] = in_mesh_instance
+
+                # if instance.function_objects:
+                #     new_fos = []
+                #     for fo in instance.function_objects:
+                #         if fo.mesh is not mesh:
+                #
+                #
+                #
+                #         init_dict = fo.__dict__
+                #         del init_dict['id']
+                #
+                #         new_fo = type(fo)(**init_dict)
+                #         if instance in fo.patches:
+                #             new_fo.patches.remove(instance)
+                #             new_fo.patches = in_mesh_instances[ii]
+                #         new_fos.append(new_fo)
+                #
+                #     in_mesh_instances[ii].function_objects = new_fos
 
         if in_mesh_instances.__len__() == 1:
             return in_mesh_instances[0]
@@ -1733,9 +1756,43 @@ class CyclicAMI(BlockMeshBoundary):
             _ = [x.set_boundary(self) for x in faces]
 
         self.neighbour_patch = kwargs.get('neighbour_patch', None)
-        self.type = 'patch'
+        self.type = 'mappedWall'
         self.transform = kwargs.get('transform', 'none')
         self.match_tolerance = kwargs.get('match_tolerance', 0.1)
+
+    @property
+    def dict_entry(self):
+
+        if self.type == 'interface':
+            return None
+
+        if self.faces.__len__() == 0:
+            return None
+
+        faces_entry = "\n".join(['\t\t\t(' + ' '.join([str(y.txt_id) for y in x.vertices]) + ')' for x in self.faces])
+
+        # return (f"\t{self.txt_id + '_' + self.name}\n"
+        #         f"\t{'{'}\n"
+        #         f"\t\ttype {self.type};\n"
+        #         f"\t\tfaces\n"
+        #         f"\t\t(\n"
+        #         f"{faces_entry}\n"
+        #         f"\t\t);\n"
+        #         f"\t{'}'}")
+
+        return (f"\t{self.txt_id}\n"
+                f"\t{'{'}\n"
+                f"\t\ttype {self.type};\n"
+                f"\t\tsampleRegion {list(self.faces[0].blocks)[0].cell_zone.txt_id};\n"
+                f"\t\tsamplePatch {self.neighbour_patch.txt_id};\n"
+                f"\t\tsampleMode nearestPatchFaceAMI;\n"
+                f"\t\toffsetMode normal;\n"
+                f"\t\tdistance 5;\n"
+                f"\t\tfaces\n"
+                f"\t\t(\n"
+                f"{faces_entry}\n"
+                f"\t\t);\n"
+                f"\t{'}'}")
 
     @property
     def create_patch_dict_entry(self):
@@ -1750,17 +1807,33 @@ class CyclicAMI(BlockMeshBoundary):
             return None
 
         return (f"{'{'}\n"
-                f"\tname {self.alt_txt_id};\n"
+                f"\tname {self.txt_id};\n"
                 f"\tpatchInfo\n"
                 f"\t{'{'}\n"
-                f"\t\ttype cyclicAMI;\n"
-                f"\t\tneighbourPatch {self.neighbour_patch.alt_txt_id};\n"
-                f"\t\ttransform {self.transform};\n"
-                f"\t\tmatchTolerance  {self.match_tolerance};\n"
+                f"\t\tsampleRegion {list(self.faces[0].blocks)[0].cell_zone.txt_id};\n"
+                f"\t\tsamplePatch {self.neighbour_patch.txt_id};\n"
+                f"\t\ttype mappedWall;\n"
+                f"\t\tsampleMode nearestPatchFaceAMI;\n"
+                f"\t\toffsetMode uniform;\n"
+                f"\t\toffset (0 0 0);\n"
                 f"\t{'}'}\n"
                 f"\tconstructFrom patches;\n"
                 f"\tpatches ({self.txt_id});\n"
                 f"{'}'}")
+
+
+        # return (f"{'{'}\n"
+        #         f"\tname {self.alt_txt_id};\n"
+        #         f"\tpatchInfo\n"
+        #         f"\t{'{'}\n"
+        #         f"\t\ttype cyclicAMI;\n"
+        #         f"\t\tneighbourPatch {self.neighbour_patch.alt_txt_id};\n"
+        #         f"\t\ttransform {self.transform};\n"
+        #         f"\t\tmatchTolerance  {self.match_tolerance};\n"
+        #         f"\t{'}'}\n"
+        #         f"\tconstructFrom patches;\n"
+        #         f"\tpatches ({self.txt_id});\n"
+        #         f"{'}'}")
 
 
 class CreatePatchDict(object):
@@ -1883,21 +1956,21 @@ pipe_wall_patch = BlockMeshBoundary(name='pipe_wall',
 
 top_side_patch = BlockMeshBoundary(name='top_side',
                                    type='wall',
-                                   user_bc=SolidConvection(),
-                                   function_objects=[WallHeatFlux()]
+                                   user_bc=SolidConvection()
                                    )
 
 bottom_side_patch = BlockMeshBoundary(name='bottom_side',
                                       type='wall',
-                                      user_bc=SolidConvection(),
-                                      function_objects=[WallHeatFlux()]
+                                      user_bc=SolidConvection()
                                       )
 
-PressureDifferencePatch(patch1=inlet_patch,
-                        patch2=outlet_patch)
-
-TemperatureDifferencePatch(patch1=inlet_patch,
-                           patch2=outlet_patch)
+# PressureDifferencePatch(patch1=inlet_patch,
+#                         patch2=outlet_patch,
+#                         name='Pressure Difference Patch')
+#
+# TemperatureDifferencePatch(patch1=inlet_patch,
+#                            patch2=outlet_patch,
+#                            name='Pressure Difference Patch')
 
 
 NoPlane = object()
@@ -3558,7 +3631,10 @@ class CellZone(object, metaclass=CellZoneMetaMock):
             if boundary.type == 'interface':
                 bc_key = boundary.txt_id
             else:
-                bc_key = boundary.txt_id + '_' + boundary.name
+                bc_key = boundary.txt_id
+
+            if isinstance(boundary, CyclicAMI):
+                bc_key = boundary.txt_id
 
             self.t.patches[bc_key] = boundary.user_bc.t
 

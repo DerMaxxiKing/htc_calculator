@@ -1,18 +1,36 @@
 from itertools import count
 from inspect import cleandoc
-from copy import deepcopy
+from copy import copy, deepcopy
+from ...logger import logger
 import uuid
 
 
 class FOMetaMock(type):
 
     instances = []
+    current_mesh = None
 
     def __call__(cls, *args, **kwargs):
-        obj = cls.__new__(cls, *args, **kwargs)
-        obj.__init__(*args, **kwargs)
-        cls.instances.append(obj)
+
+        mesh = kwargs.get('mesh', None)
+        if mesh is None:
+            mesh = cls.current_mesh
+            kwargs['mesh'] = mesh
+
+        if not kwargs.get('create', False):
+            obj = cls.get_fo()
+        else:
+            obj = None
+
+        if obj is None:
+            obj = cls.__new__(cls, *args, **kwargs)
+            obj.__init__(*args, **kwargs)
+            cls.current_mesh.function_objects.append(obj)
+            cls.current_mesh.function_object_ids[obj.id] = obj
         return obj
+
+    def get_fo(cls):
+        return None
 
 
 class WallHeatFlux(object, metaclass=FOMetaMock):
@@ -32,6 +50,7 @@ class WallHeatFlux(object, metaclass=FOMetaMock):
     def __init__(self, *args, **kwargs):
 
         self._txt_id = None
+        self._cell_zone = None
         # self._dict_entry = None
 
         self.name = kwargs.get('name')
@@ -39,6 +58,7 @@ class WallHeatFlux(object, metaclass=FOMetaMock):
 
         self.cell_zone = kwargs.get('cell_zone', None)
         self.patches = kwargs.get('patches', set())
+        self.mesh = kwargs.get('mesh')
 
     @property
     def txt_id(self):
@@ -52,6 +72,16 @@ class WallHeatFlux(object, metaclass=FOMetaMock):
     @txt_id.setter
     def txt_id(self, value):
         self._txt_id = value
+
+    @property
+    def cell_zone(self):
+        if self._cell_zone is None:
+            self._cell_zone = self.patches.blocks[0].cell_zone
+        return self._cell_zone
+
+    @cell_zone.setter
+    def cell_zone(self, value):
+        self._cell_zone = value
 
     @property
     def dict_entry(self):
@@ -115,8 +145,9 @@ class PressureDifferencePatch(object, metaclass=FOMetaMock):
         self.id = kwargs.get('id', next(WallHeatFlux.id_iter))
 
         self.cell_zone = kwargs.get('cell_zone', None)
-        self.patch1 = kwargs.get('patch1')
-        self.patch2 = kwargs.get('patch2')
+        self.patch1 = kwargs.get('patch1', set())
+        self.patch2 = kwargs.get('patch2', set())
+        self.mesh = kwargs.get('mesh')
 
     @property
     def txt_id(self):
@@ -195,8 +226,10 @@ class TemperatureDifferencePatch(object, metaclass=FOMetaMock):
         self.id = kwargs.get('id', next(WallHeatFlux.id_iter))
 
         self.cell_zone = kwargs.get('cell_zone', None)
-        self.patch1 = kwargs.get('patch1')
-        self.patch2 = kwargs.get('patch2')
+        self.patch1 = kwargs.get('patch1', set())
+        self.patch2 = kwargs.get('patch2', set())
+
+        self.mesh = kwargs.get('mesh')
 
     @property
     def txt_id(self):
