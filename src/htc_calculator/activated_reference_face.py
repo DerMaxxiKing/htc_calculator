@@ -431,6 +431,7 @@ class ActivatedReferenceFace(ReferenceFace):
                 dist = layer_positions[i] - dist0                               # -> distance ② to bottom face
                 lower_layer_blocks = extrude_2d_mesh(quad_mesh,
                                                      distance=dist,
+                                                     grading=[1, 1, 0.33],
                                                      direction=self.normal * self.layer_dir,
                                                      block_name=f'Pipe Layer ({i}) lower block')
                 new_blocks.extend(lower_layer_blocks)
@@ -460,6 +461,7 @@ class ActivatedReferenceFace(ReferenceFace):
                 upper_layer_blocks = extrude_2d_mesh(quad_mesh,
                                                      distance=dist,
                                                      direction=self.normal,
+                                                     grading=[1, 1, 3],
                                                      block_name=f'Pipe Layer ({i}) upper block')
                 new_blocks.extend(upper_layer_blocks)
                 layer_mesh.bottom_faces = [block.faces[0] for block in upper_layer_blocks]
@@ -542,7 +544,17 @@ class ActivatedReferenceFace(ReferenceFace):
         return free_comp_block
         # export_objects([x.fc_solid for x in new_blocks], '/tmp/extrude_block.FCStd')
 
-    def update_cell_zone(self, blocks=None):
+    def update_cell_zone(self, blocks=None, mesh=None):
+
+        last_activated_mesh = BlockMeshEdge.current_mesh
+
+        if mesh is not None:
+            mesh.activate()
+            foreign_cell_zones = list({x.cell_zone for x in blocks if (x.cell_zone is not None)})
+            local_cell_zones = CellZone.copy_to_mesh(instances=foreign_cell_zones,
+                                                     mesh=mesh)
+            cell_zone_lookup_dict = dict(zip(foreign_cell_zones, local_cell_zones))
+            _ = [setattr(x, 'cell_zone', cell_zone_lookup_dict[x.cell_zone]) for x in blocks if (x.cell_zone is not None)]
 
         logger.info('Updating cell zones...')
 
@@ -566,9 +578,10 @@ class ActivatedReferenceFace(ReferenceFace):
         #         layer_interface_planes[0].distToShape(
         #     FCPart.Vertex(tuple(x.dirty_center)))[0] < layer_thicknesses) - 1])
         #      for x in check_blocks if x.cell_zone is None]
-
+        cell_zones = set()
         for block in tqdm(check_blocks, desc='Updating cell zones', colour="green"):
             if block.cell_zone is not None:
+                cell_zones.add(block.cell_zone)
                 if block.cell_zone.material is not None:
                     continue
             try:
@@ -577,7 +590,9 @@ class ActivatedReferenceFace(ReferenceFace):
                 #     FCPart.Vertex(block.fc_solid.CenterOfGravity))[0] < layer_thicknesses) - 1]
                 material = layer_materials[np.argmax(layer_interface_planes[0].distToShape(
                     FCPart.Vertex(tuple(block.dirty_center)))[0] < layer_thicknesses) - 1]
-                block.cell_zone = CellZone(material=material)
+                block.cell_zone = CellZone(material=material,
+                                           mesh=mesh)
+                cell_zones.add(block.cell_zone)
             except Exception as e:
                 raise e
 
@@ -588,6 +603,8 @@ class ActivatedReferenceFace(ReferenceFace):
         #                '/tmp/update_mat.FCStd')
 
         logger.info('Cell zones updated successfully')
+        last_activated_mesh.activate()
+        return cell_zones
 
     def combine_meshes(self):
         logger.info('Creating combined mesh...')

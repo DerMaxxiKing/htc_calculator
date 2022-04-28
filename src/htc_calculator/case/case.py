@@ -306,7 +306,7 @@ class OFCase(object):
     def run_split_mesh_regions(self):
         logger.info(f'Splitting Mesh Regions....')
         res = subprocess.run(
-            ["/bin/bash", "-i", "-c", "splitMeshRegions -cellZones -overwrite 2>&1 | tee splitMeshRegions.log"],
+            ["/bin/bash", "-i", "-c", "splitMeshRegions -cellZonesOnly -overwrite 2>&1 | tee splitMeshRegions.log"],
             capture_output=True,
             cwd=self.case_dir,
             user='root')
@@ -387,6 +387,7 @@ class OFCase(object):
         #                   )
 
         combined_mesh = self.reference_face.combine_meshes()
+        combined_mesh.case_dir = self.case_dir
 
         return combined_mesh
 
@@ -397,7 +398,7 @@ class OFCase(object):
         _ = self.reference_face.extruded_comp_blocks
         comp_blocks = self.reference_face.comp_blocks
 
-        self.reference_face.update_cell_zone()
+        cell_zones = self.reference_face.update_cell_zone()
         self.reference_face.update_boundary_conditions()
 
         self.block_mesh.init_case()
@@ -490,7 +491,9 @@ class OFCase(object):
         #
         # combined_mesh = self.reference_face.combine_meshes()
 
-        self.reference_face.update_cell_zone(blocks=self.combined_mesh.mesh.blocks)
+        cell_zones = self.reference_face.update_cell_zone(blocks=self.combined_mesh.mesh.blocks,
+                                                          mesh=self.combined_mesh.mesh)
+
         # self.reference_face.update_boundary_conditions(self.combined_mesh)
 
         logger.info('Updating boundary conditions...')
@@ -502,17 +505,32 @@ class OFCase(object):
 
         # export_objects([FCPart.Compound([x.fc_face for x in wall_faces])], '/tmp/wall_faces.FCStd')
         # export_objects([FCPart.Compound([x.fc_face for x in
-        #                                  [*self.combined_mesh.bottom_faces, *self.combined_mesh.top_faces]])], '/tmp/top_bottom.FCStd')
+        #                                  [*self.combined_mesh.bottom_faces, *self.combined_mesh.top_faces]])],
+        #                                  '/tmp/top_bottom.FCStd')
 
         _ = [x.set_boundary(wall_patch) for x in wall_faces]
 
         self.combined_mesh.init_case()
-        self.combined_mesh.run_block_mesh(run_parafoam=True)
 
+        for cell_zone in cell_zones:
+            cell_zone.write_to_of(self.case_dir)
+
+        # write region properties:
+        write_region_properties(cell_zones, self.case_dir)
+
+        self.combined_mesh.run_block_mesh(run_parafoam=True)
         self.create_patch_dict.boundaries = [x for x in self.combined_mesh.mesh.boundaries.values() if (type(x) is CyclicAMI)]
         self.create_patch_dict.case_dir = self.combined_mesh.case_dir
         self.create_patch_dict.write_create_patch_dict()
         self.create_patch_dict.run()
+
+        self.run_split_mesh_regions()
+
+        self.write_all_mesh()
+        self.write_all_run()
+        self.write_all_clean()
+
+        print('done')
 
 
         # logger.info('Adding cyclicAMI boundary condition to mesh interfaces')

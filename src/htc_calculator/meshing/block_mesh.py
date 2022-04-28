@@ -98,6 +98,7 @@ class Mesh(object, metaclass=MeshMetaMock):
         self.boundary_ids = kwargs.get('boundary_ids', {})
         self.blocks = kwargs.get('blocks', [])
         self.cell_zones = kwargs.get('cell_zones', [])
+        self.cell_zone_ids = kwargs.get('cell_zone_ids', {})
         self.comp_blocks = kwargs.get('comp_blocks', [])
         self.mesh_contacts = kwargs.get('mesh_contacts', {})
 
@@ -967,7 +968,7 @@ class BlockMetaMock(type):
 
         in_mesh_instances = [None] * instances.__len__()
         for ii, instance in enumerate(instances):
-            if instances.id in instance_ids.keys():
+            if instance.id in instance_ids.keys():
                 in_mesh_instance = instance
             else:
                 init_dict = copy.copy(instance.__dict__)
@@ -1019,12 +1020,43 @@ class CellZoneMetaMock(type):
         if obj is None:
             obj = cls.__new__(cls, *args, **kwargs)
             obj.__init__(*args, **kwargs)
-            cls.instances.append(obj)
+            mesh.cell_zones.append(obj)
+            mesh.cell_zone_ids[obj.id] = obj
         return obj
 
     @property
     def instances(cls):
         return cls.current_mesh.cell_zones
+
+    def copy_to_mesh(cls, instances=None, mesh: Mesh = None):
+
+        instance_ids = mesh.cell_zone_ids
+
+        if mesh is None:
+            mesh = cls.current_mesh
+
+        if not hasattr(instances, '__contains__'):  # make it iterable if is not
+            instances = [instances]
+
+        in_mesh_instances = [None] * instances.__len__()
+        for ii, instance in enumerate(instances):
+            if instance.id in instance_ids.keys():
+                in_mesh_instance = instance
+            else:
+                init_dict = copy.copy(instance.__dict__)
+                delete_keys = ['id', 'dict_id', 'alt_id']
+                for key in delete_keys:
+                    if key in init_dict.keys():
+                        del init_dict[key]
+
+                init_dict['mesh'] = mesh
+                in_mesh_instance = cls(**init_dict)
+            in_mesh_instances[ii] = in_mesh_instance
+
+        if in_mesh_instances.__len__() == 1:
+            return in_mesh_instances[0]
+        else:
+            return in_mesh_instances
 
 
 class CompBlockMetaMock(type):
@@ -1181,7 +1213,7 @@ class BlockMeshVertex(object, metaclass=VertexMetaMock):
 class BlockMeshEdge(object, metaclass=EdgeMetaMock):
     # id_iter = itertools.count()
 
-    arc_cell_factor = 1
+    arc_cell_factor = 2
 
     @classmethod
     def from_fc_edge(cls, fc_edge, mesh=None, num_cells=None, fixed_num_cells=False):
@@ -4653,7 +4685,10 @@ def angle_between_vertices(p1, p2, p3, deg=True):
         return angle
 
 
-def extrude_2d_mesh(mesh, distance, direction, block_name='Extruded Block', mesh_to_add=None):
+def extrude_2d_mesh(mesh, distance, direction, block_name='Extruded Block', mesh_to_add=None, grading=None):
+
+    if grading is None:
+        grading = [1, 1, 1]
 
     if mesh_to_add is None:
         mesh_to_add = Block.current_mesh
@@ -4671,6 +4706,7 @@ def extrude_2d_mesh(mesh, distance, direction, block_name='Extruded Block', mesh
                               name=block_name,
                               auto_cell_size=True,
                               extruded=False,
+                              grading=grading,
                               mesh=mesh_to_add)
             blocks.append(new_block)
 
@@ -4684,6 +4720,7 @@ def extrude_2d_mesh(mesh, distance, direction, block_name='Extruded Block', mesh
                               auto_cell_size=True,
                               extruded=False,
                               non_regular=True,
+                              grading=grading,
                               mesh=mesh_to_add)
 
             blocks.append(new_block)
