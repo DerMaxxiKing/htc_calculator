@@ -507,8 +507,8 @@ class OFCase(object):
         # export_objects([FCPart.Compound([x.fc_face for x in
         #                                  [*self.combined_mesh.bottom_faces, *self.combined_mesh.top_faces]])],
         #                                  '/tmp/top_bottom.FCStd')
-
-        _ = [x.set_boundary(wall_patch) for x in wall_faces]
+        local_wall_patch = BlockMeshBoundary.copy_to_mesh(wall_patch, self.combined_mesh.mesh)
+        _ = [setattr(x, 'boundary', local_wall_patch) for x in wall_faces]
 
         self.combined_mesh.init_case()
 
@@ -525,12 +525,59 @@ class OFCase(object):
         self.create_patch_dict.run()
 
         self.run_split_mesh_regions()
+        self.run_parafoam()
 
         self.write_all_mesh()
         self.write_all_run()
         self.write_all_clean()
 
-        print('done')
+        for cell_zone in cell_zones:
+            cell_zone.case = self
+            of_dict = CppDictParser.from_file(os.path.join(self.case_dir, 'constant',
+                                                           cell_zone.txt_id, 'polyMesh', 'boundary'))
+            boundary_dict = {k: v for k, v in of_dict.values.items() if (v and (k != 'FoamFile'))}
+
+            boundaries = []
+            for key, value in boundary_dict.items():
+                boundary = BlockMeshBoundary.get_boundary_by_txt_id(key, mesh=self.combined_mesh.mesh)
+                if boundary is None:
+                    if '_to_' in key:
+                        # create interface
+                        if isinstance(cell_zone.material, Solid):
+                            user_bc = SolidFluidInterface()
+                        elif isinstance(cell_zone.material, Fluid):
+                            user_bc = FluidSolidInterface()
+                        else:
+                            raise NotImplementedError
+
+                        boundary = BlockMeshBoundary(name=key,
+                                                     type='interface',
+                                                     n_faces=value['nFaces'],
+                                                     start_face=value['startFace'],
+                                                     case=self,
+                                                     mesh=self.combined_mesh.mesh,
+                                                     txt_id=key,
+                                                     user_bc=user_bc,
+                                                     cell_zone=cell_zone)
+                    else:
+                        raise NotImplementedError()
+                else:
+                    boundary.n_faces = value['nFaces']
+                    boundary.startFace = value['startFace']
+                    boundary.case = self
+                    boundary.cell_zone = cell_zone
+
+                boundaries.append(boundary)
+
+            cell_zone.boundaries = boundaries
+            cell_zone.update_bcs()
+            cell_zone.write_bcs(self.case_dir)
+
+        self.add_function_objects()
+        self.write_control_dict()
+        self.run_decompose_par()
+
+        logger.debug('bla bla')
 
 
         # logger.info('Adding cyclicAMI boundary condition to mesh interfaces')

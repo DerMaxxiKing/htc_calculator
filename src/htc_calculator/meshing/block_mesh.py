@@ -854,8 +854,17 @@ class BoundaryMetaMock(type):
     def get_boundary_by_name(cls, name):
         return next((x for x in cls.instances if x.name == name), None)
 
-    def get_boundary_by_txt_id(cls, txt_id):
-        return next((cls.instances[key] for key, value in cls.instances.items() if (value.txt_id + '_' + value.name) == txt_id), None)
+    def get_boundary_by_txt_id(cls, txt_id, mesh=None):
+        if mesh is None:
+            mesh = cls.current_mesh
+        boundary = next((mesh.boundaries[key] for key, value in mesh.boundaries.items()
+                         if value.txt_id == txt_id), None)
+        if boundary is None:
+            return next((mesh.boundaries[value.name] for key,
+                                                         value in mesh.boundaries.items()
+                         if value.alt_txt_id == txt_id), None)
+        else:
+            return boundary
 
     def __call__(cls, *args, **kwargs):
         mesh = kwargs.get('mesh', None)
