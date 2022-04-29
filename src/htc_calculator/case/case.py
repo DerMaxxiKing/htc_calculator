@@ -4,9 +4,10 @@ import uuid
 import os
 import stat
 import subprocess
+from subprocess import Popen, PIPE, STDOUT
 from re import findall, MULTILINE
 
-from ..config import work_dir
+from ..config import work_dir, n_proc
 from ..logger import logger
 from ..meshing.block_mesh import BlockMesh, inlet_patch, outlet_patch, wall_patch, pipe_wall_patch, top_side_patch, \
     bottom_side_patch, CellZone, BlockMeshBoundary, Mesh, CreatePatchDict, export_objects, add_face_contacts, PipeLayerMesh, CyclicAMI
@@ -159,7 +160,7 @@ class OFCase(object):
     def decompose_par_dict(self):
         if self._decompose_par_dict is None:
             tp_entry = pkg_resources.read_text(case_resources, 'decomposeParDict')
-            tp_entry = tp_entry.replace('<n_proc>', str(self.n_proc))
+            tp_entry = tp_entry.replace('<n_proc>', str(n_proc))
             self._decompose_par_dict = tp_entry
         return self._decompose_par_dict
 
@@ -352,6 +353,22 @@ class OFCase(object):
         else:
             logger.error(f"{res.stderr.decode('ascii')}")
         return True
+
+    def run_allrun(self):
+        logger.info(f'Running solver....')
+
+        execute(["/bin/bash", "-i", "-c", "./Allrun"], cwd=self.case_dir)
+
+        # res = subprocess.run(["/bin/bash", "-i", "-c", "./Allrun"],
+        #                      capture_output=True,
+        #                      cwd=self.case_dir,
+        #                      user='root')
+        # if res.returncode == 0:
+        #     output = res.stdout.decode('ascii')
+        #     logger.info(f"Successfully ran solver \n\n{output}")
+        # else:
+        #     logger.error(f"{res.stderr.decode('ascii')}")
+        # return True
 
     def add_function_objects(self, mesh=None):
 
@@ -600,6 +617,8 @@ class OFCase(object):
         self.write_decompose_par_dict()
         self.run_decompose_par()
 
+        self.run_allrun()
+
         logger.debug('bla bla')
 
 
@@ -635,3 +654,9 @@ class OFCase(object):
         #     block_mesh.run_block_mesh(run_parafoam=True)
         #
         # print('done')
+
+
+def execute(command, cwd):
+    p = Popen(command, stdin=PIPE, stdout=PIPE, stderr=STDOUT, cwd=cwd)
+    for line in p.stdout:
+        print(line)

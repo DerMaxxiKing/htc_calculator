@@ -1786,8 +1786,6 @@ class CyclicAMI(BlockMeshBoundary):
                 f"\t\tsampleRegion {list(self.faces[0].blocks)[0].cell_zone.txt_id};\n"
                 f"\t\tsamplePatch {self.neighbour_patch.txt_id};\n"
                 f"\t\tsampleMode nearestPatchFaceAMI;\n"
-                f"\t\toffsetMode normal;\n"
-                f"\t\tdistance 5;\n"
                 f"\t\tfaces\n"
                 f"\t\t(\n"
                 f"{faces_entry}\n"
