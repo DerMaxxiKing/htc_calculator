@@ -541,6 +541,7 @@ class OFCase(object):
         write_region_properties(cell_zones, self.case_dir)
 
         self.combined_mesh.run_block_mesh(run_parafoam=True)
+        self.run_check_mesh()
         # self.create_patch_dict.boundaries = [x for x in self.combined_mesh.mesh.boundaries.values() if (type(x) is CyclicAMI)]
         # self.create_patch_dict.case_dir = self.combined_mesh.case_dir
         # self.create_patch_dict.write_create_patch_dict()

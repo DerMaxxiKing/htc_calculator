@@ -27,7 +27,18 @@ solvers
 
 PIMPLE
 {
-    nNonOrthogonalCorrectors 0;
+    nNonOrthogonalCorrectors 5;
+}
+
+relaxationFactors
+{
+    fields
+    {
+    }
+    equations
+    {
+        h               0.7;
+    }
 }
 
 // ************************************************************************* //

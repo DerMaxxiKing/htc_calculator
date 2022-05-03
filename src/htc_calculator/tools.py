@@ -521,11 +521,18 @@ def add_radius_to_edges(edges, radius):
             current_edges.append(edges[i])
             i += 1
         else:
-            new_edges = make_fillet([current_edges[-1], edges[i]], radius=radius)
+            if (current_edges[-1].Length == radius) or (edges[i].Length == radius):
+                new_edges = make_fillet([current_edges[-1], edges[i]], radius=radius - 1e-8)
+            else:
+                new_edges = make_fillet([current_edges[-1], edges[i]], radius=radius)
+
             if new_edges is None:
+                export_objects([current_edges[-1], edges[i]], '/tmp/radius.FCStd')
                 raise Exception(f'Error adding radius to edges {i-1} - {i}')
-            current_edges[-1] = new_edges.Shape.OrderedEdges[0]
-            current_edges.extend(new_edges.Shape.OrderedEdges[1:])
+
+            ordered_edges = [x for x in new_edges.Shape.OrderedEdges if x.Length > 1e-3]
+            current_edges[-1] = ordered_edges[0]
+            current_edges.extend(ordered_edges[1:])
             i += 1
         edges_with_radius = FCPart.Wire(current_edges)
 
@@ -997,6 +1004,7 @@ def calc_d(l_e, beta, radius):
 
 
 def split_wire_by_projected_vertices(wire, vertices, dist, ensure_closed=False):
+
     cutted_ref_face_edges = []
     for edge in wire.OrderedEdges:
         edge_parameters = [edge.FirstParameter, edge.LastParameter]
@@ -1007,24 +1015,120 @@ def split_wire_by_projected_vertices(wire, vertices, dist, ensure_closed=False):
                 if (parameter not in edge_parameters) and (edge.FirstParameter < parameter < edge.LastParameter):
                     split_parameters.append(parameter)
         split_parameters = sorted(list(set(split_parameters)))
+        split_parameters = [x for x in split_parameters if
+                            ((x - edge.FirstParameter) > 100 and (edge.LastParameter - x) > 100)]
+
+        # try:
+        #     if split_parameters:
+        #         cutted_ref_face_edges.extend(edge.split(split_parameters).Edges)
+        #     else:
+        #         cutted_ref_face_edges.append(edge)
+        # except Exception as e:
+        #     raise e
 
         try:
-            cutted_ref_face_edges.extend(edge.split(split_parameters).Edges)
+            if split_parameters:
+                if isinstance(edge.Curve, FCPart.Line):
+                    new_vertices = [edge.Vertex1, *[FCPart.Vertex(edge.valueAt(x)) for x in split_parameters], edge.Vertex2]
+                    new_edges = [FCPart.LineSegment(new_vertices[i].Point, new_vertices[i+1].Point).toShape() for i in range(new_vertices.__len__()-1)]
+                else:
+                    raise NotImplementedError
+
+                cutted_ref_face_edges.extend(new_edges)
+
+            else:
+                cutted_ref_face_edges.append(edge)
         except Exception as e:
+            export_objects([FCPart.Compound(cutted_ref_face_edges),
+                           *new_edges], '/tmp/cutted_ref_face_edges.FCStd')
             raise e
 
-    sorted_edges = FCPart.sortEdges(cutted_ref_face_edges)[0]
+    e0 = cutted_ref_face_edges[0]
+    for cutted_ref_face_edge in cutted_ref_face_edges[1:]:
+        e0 = e0.fuse(cutted_ref_face_edge)
+    cutted_ref_face_edges = e0.Edges
+
+    new_edges = create_new_edges(FCPart.__sortEdges__(cutted_ref_face_edges))
 
     if ensure_closed:
-        wire = FCPart.Wire(sorted_edges)
-        if not wire.isClosed():
-            return FCPart.Wire([*wire.OrderedEdges,
-                                FCPart.LineSegment(wire.OrderedVertexes[-1].Point, wire.OrderedVertexes[0].Point).toShape()])
+        sorted_edges = FCPart.__sortEdges__(new_edges)
+        new_wire = FCPart.Wire(sorted_edges)
+        if not new_wire.isClosed():
+            return FCPart.Wire([*new_wire.OrderedEdges,
+                                FCPart.LineSegment(new_wire.OrderedVertexes[-1].Point,
+                                                   new_wire.OrderedVertexes[0].Point).toShape()])
+        else:
+            return new_wire
 
     else:
-        return FCPart.Wire(sorted_edges)
+        return FCPart.Wire(FCPart.sortEdges(cutted_ref_face_edges)[0])
+
+
+def create_new_edges(edges):
+    new_edges = [None] * edges.__len__()
+    for i, edge in enumerate(edges):
+        if i == 0:
+            v0 = edge.Vertex1
+            v1 = edge.Vertex2
+        else:
+            try:
+                if (edge.Vertex1.Point - new_edges[i-1].Vertex1.Point).Length < 1e-3:
+                    v0 = new_edges[-1].Vertex1
+                    v1 = edge.Vertex2
+                elif (edge.Vertex2.Point - new_edges[i-1].Vertex1.Point).Length < 1e-3:
+                    v0 = new_edges[i-1].Vertex1
+                    v1 = edge.Vertex1
+                elif (edge.Vertex1.Point - new_edges[i-1].Vertex2.Point).Length < 1e-3:
+                    v0 = new_edges[i-1].Vertex2
+                    v1 = edge.Vertex2
+                elif (edge.Vertex2.Point == new_edges[i-1].Vertex2.Point).Length < 1e-3:
+                    v0 = new_edges[i-1].Vertex2
+                    v1 = edge.Vertex1
+                else:
+                    raise Exception('Edges not connected')
+            except Exception as e:
+                raise e
+
+        if isinstance(edge.Curve, FCPart.Line):
+            new_edges[i] = FCPart.LineSegment(v0.Point, v1.Point).toShape()
+        elif isinstance(edge.Curve, FCPart.BSplineCurve):
+            arcs = edge.Curve.toBiArcs(100)
+            new_edges[i] = FCPart.Edge(
+                FCPart.Arc(
+                    v0.Point,
+                    ((v0.Point - arcs[0].Center) + (v1.Point - arcs[0].Center)).normalize() * arcs[0].Radius + v0.Point,
+                    v1.Point)
+            )
+        else:
+            raise NotImplementedError('Edge c')
+
+    return new_edges
 
 
 def array_row_intersection(a, b):
     tmp = np.prod(np.swapaxes(a[:, :, None], 1, 2) == b, axis=2)
     return a[np.sum(np.cumsum(tmp, axis=0)*tmp == 1, axis=1).astype(bool)]
+
+
+def remove_small_edges(edges):
+    edges_length = np.array([x.Length for x in edges])
+    if any(edges_length < 1):
+        wire = FCPart.Wire(edges)
+        fixed_edges = []
+        for i, e2fix in enumerate(wire.OrderedEdges):
+            if e2fix.Length < 1:
+                if i == 0:
+                    v1 = wire.OrderedVertexes[i]
+                    v2 = wire.OrderedVertexes[i + 2]
+                    n_edge = FCPart.LineSegment(v1, v2).toShape()
+                    fixed_edges.append(n_edge)
+                if i == wire.OrderedEdges.__len__():
+                    v1 = wire.OrderedVertexes[i - 1]
+                    v2 = wire.OrderedVertexes[i + 1]
+                    n_edge = FCPart.LineSegment(v1, v2).toShape()
+                    fixed_edges[-1] = n_edge
+            else:
+                fixed_edges.append(e2fix)
+        return fixed_edges
+    else:
+        return edges

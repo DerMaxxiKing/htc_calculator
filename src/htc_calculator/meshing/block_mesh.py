@@ -1834,6 +1834,39 @@ class CyclicAMI(BlockMeshBoundary):
         #         f"{'}'}")
 
 
+class NearestPatchFaceAMI(BlockMeshBoundary):
+
+    def __init__(self, *args, **kwargs):
+        BlockMeshBoundary.__init__(self, *args, **kwargs)
+
+        faces = kwargs.get('faces', None)
+        if faces is not None:
+            _ = [x.set_boundary(self) for x in faces]
+
+        self.neighbour_patch = kwargs.get('neighbour_patch', None)
+        self.type = 'mappedWall'
+
+    @property
+    def dict_entry(self):
+
+        if self.faces.__len__() == 0:
+            return None
+
+        faces_entry = "\n".join(['\t\t\t(' + ' '.join([str(y.txt_id) for y in x.vertices]) + ')' for x in self.faces])
+
+        return (f"\t{self.txt_id}\n"
+                f"\t{'{'}\n"
+                f"\t\ttype {self.type};\n"
+                f"\t\tsampleRegion {list(self.faces[0].blocks)[0].cell_zone.txt_id};\n"
+                f"\t\tsamplePatch {self.neighbour_patch.txt_id};\n"
+                f"\t\tsampleMode nearestPatchFaceAMI;\n"
+                f"\t\tfaces\n"
+                f"\t\t(\n"
+                f"{faces_entry}\n"
+                f"\t\t);\n"
+                f"\t{'}'}")
+
+
 class CreatePatchDict(object):
     default_path = '/tmp/'
 
@@ -2576,8 +2609,11 @@ class Block(object, metaclass=BlockMetaMock):
             if instance.merge_patch_pairs:
                 continue
             instance._parallel_edges_sets = []
+            instance.num_cells = None
             for p_edges in Block.all_parallel_edges:
                 instance._parallel_edges_sets.append(ParallelEdgesSet.add_set(instance.block_edges[p_edges]))
+
+        logger.debug('Updated parallel edges')
 
     @classmethod
     def block_mesh_entry(cls, blocks=None):
@@ -2585,7 +2621,8 @@ class Block(object, metaclass=BlockMetaMock):
         if blocks is None:
             blocks = cls.instances
 
-        block_entries = ['\t' + x.dict_entry for x in blocks if ((not x.duplicate) and (x.dict_entry is not None))]
+        block_entries = ['\t' + x.dict_entry + f' Block {i}' for i, x in
+                         enumerate(blocks) if ((not x.duplicate) and (x.dict_entry is not None))]
         # block_entries = [None] * cls.instances.__len__()
         # for i, block in enumerate(BlockMetaMock.instances):
         #     block_entries[i] = '\t' + block.dict_entry
@@ -2835,6 +2872,8 @@ class Block(object, metaclass=BlockMetaMock):
 
         # export_objects([self.fc_solid, *[x.fc_vertex.toShape() for x in self.vertices]], '/tmp/test_export.FCStd')
 
+        num_cells = self.num_cells
+
         if self.non_regular:
             v0 = vertices[2].fc_vertex.toShape().Point - vertices[1].fc_vertex.toShape().Point
             v1 = vertices[0].fc_vertex.toShape().Point - vertices[1].fc_vertex.toShape().Point
@@ -2844,13 +2883,17 @@ class Block(object, metaclass=BlockMetaMock):
 
             if np.allclose(v2_ref, v2.normalize()):
                 corrected_vertices = np.array(vertices)[np.array([1, 2, 3, 0, 5, 6, 7, 4])].tolist()
+                num_cells = [num_cells[1], num_cells[0], num_cells[2]]
             elif np.allclose(v2_ref, -v2.normalize()):
                 corrected_vertices = np.array(vertices)[np.array([5, 6, 7, 4, 1, 2, 3, 0])].tolist()
+                num_cells = [num_cells[1], num_cells[0], num_cells[2]]
             else:
                 if abs(angle_between_vectors(v2_ref, v2, v0)) < 90:
                     corrected_vertices = np.array(vertices)[np.array([1, 2, 3, 0, 5, 6, 7, 4])].tolist()
+                    num_cells = [num_cells[1], num_cells[0], num_cells[2]]
                 else:
                     corrected_vertices = np.array(vertices)[np.array([5, 6, 7, 4, 1, 2, 3, 0])].tolist()
+                    num_cells = [num_cells[1], num_cells[0], num_cells[2]]
 
         else:
             v0 = vertices[1].fc_vertex.toShape().Point - vertices[0].fc_vertex.toShape().Point
@@ -2878,7 +2921,7 @@ class Block(object, metaclass=BlockMetaMock):
             cell_zone = None
 
         return f"hex ({' '.join([x.txt_id for x in corrected_vertices])}) {cell_zone} " \
-               f"({self.num_cells[0]} {self.num_cells[1]} {self.num_cells[2]}) " \
+               f"({num_cells[0]} {num_cells[1]} {num_cells[2]}) " \
                f"simpleGrading ({self.grading[0]} {self.grading[1]} {self.grading[2]})" \
                f"// block {self.id}"
 
@@ -4020,6 +4063,8 @@ class BlockMesh(object):
             # contacts = CompBlock.search_merge_patch_pairs()
         logger.info(f'Updating parallel edges')
         Block.update_parallel_edges(blocks=blocks)
+
+        logger.info(f'Merging parallel edge sets')
         ParallelEdgesSet.merge_sets(pe_sets=pe_sets)
 
         # export_objects([FCPart.Compound([x.fc_edge for x in y.edges]) for y in ParallelEdgesSet.instances],

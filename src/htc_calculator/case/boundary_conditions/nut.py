@@ -104,8 +104,8 @@ class NutkRoughWallFunction(BoundaryCondition):
         """
         BoundaryCondition.__init__(self, *args, **kwargs)
         self.object = 'nut'
-        self.ks = kwargs.get('ks', 100e-6)
-        self.cs = kwargs.get('cs', 0.5)
+        self.ks = kwargs.get('ks', 1e-6)
+        self.cs = kwargs.get('cs', 1e-6)
         self.value = kwargs.get('value', default_value)
 
     def generate_dict_entry(self, *args, **kwargs):

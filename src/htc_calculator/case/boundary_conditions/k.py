@@ -77,8 +77,8 @@ class TurbulentIntensityKineticEnergyInlet(BoundaryCondition):
     def __init__(self, *args, **kwargs):
         BoundaryCondition.__init__(self, *args, **kwargs)
         self.object = 'k'
-        self.value = kwargs.get('value', 0.00463812)
-        self.intensity = kwargs.get('intensity', 0.05)
+        self.value = kwargs.get('value', 1e-6)
+        self.intensity = kwargs.get('intensity', 1e-6)
 
     def generate_dict_entry(self, *args, **kwargs):
         template = deepcopy(self.template)
@@ -99,7 +99,7 @@ class KqRWallFunction(BoundaryCondition):
     def __init__(self, *args, **kwargs):
         BoundaryCondition.__init__(self, *args, **kwargs)
         self.object = 'k'
-        self.value = kwargs.get('value', 0.00463812)
+        self.value = kwargs.get('value', 1e-6)
 
     def generate_dict_entry(self, *args, **kwargs):
         template = deepcopy(self.template)

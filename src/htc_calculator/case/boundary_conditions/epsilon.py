@@ -62,7 +62,7 @@ class EpsilonWallFunction(BoundaryCondition):
 
     def __init__(self, *args, **kwargs):
         BoundaryCondition.__init__(self, *args, **kwargs)
-        self.value = kwargs.get('value', 0.0064879)
+        self.value = kwargs.get('value', 1e-6)
         self.object = 'epsilon'
 
     def generate_dict_entry(self, *args, **kwargs):
@@ -101,8 +101,8 @@ class TurbulentMixingLengthDissipationRateInlet(BoundaryCondition):
         :param kwargs:
         """
         BoundaryCondition.__init__(self, *args, **kwargs)
-        self.mixing_length = kwargs.get('mixing_length', 0.008)
-        self.value = kwargs.get('value', 0.0064879)
+        self.mixing_length = kwargs.get('mixing_length', 1e-6)
+        self.value = kwargs.get('value', 1e-6)
         self.object = 'epsilon'
 
     def generate_dict_entry(self, *args, **kwargs):

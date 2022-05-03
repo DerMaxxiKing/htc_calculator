@@ -320,34 +320,39 @@ class ActivatedReferenceFace(ReferenceFace):
 
         logger.info(f'Splitting wire with projected edges')
         # cutted_face = ref_face2.cut(Block.comp_solid)
-        splitted_ref_face_wire = split_wire_by_projected_vertices(ref_face2.OuterWire,
-                                                                  cutted_face.SubShapes[0].Vertexes,
-                                                                  self.tube_edge_distance)
-        cutted_ref_face = FCPart.Face(splitted_ref_face_wire).translate(mv_vec)
-        cutted_face = cutted_ref_face.cut(self.pipe_comp_blocks.fc_solid)
+        splitted_ref_face_wire = split_wire_by_projected_vertices(cutted_face.SubShapes[0].OuterWire,
+                                                                  [*cutted_face.SubShapes[0].OuterWire.Vertexes],
+                                                                  self.tube_edge_distance,
+                                                                  ensure_closed=True)
+        # splitted_ref_face_wire = cutted_face.SubShapes[0].OuterWire
+        # cutted_ref_face = FCPart.Face(splitted_ref_face_wire).translate(mv_vec)
+        # cutted_face = cutted_ref_face.cut(self.pipe_comp_blocks.fc_solid)
+        # export_objects(splitted_ref_face_wire, '/tmp/splitted_ref_face_wire.FCStd')
 
         # add points to second (inner) face
-        # splitted_inner_face_wire = split_wire_by_projected_vertices(cutted_face.SubShapes[1].OuterWire,
-        #                                                             [],
-        #                                                             3 * self.tube_diameter,
-        #                                                             ensure_closed=True)
+        splitted_inner_face_wire = split_wire_by_projected_vertices(cutted_face.SubShapes[1].OuterWire,
+                                                                    cutted_face.SubShapes[1].OuterWire.Vertexes,
+                                                                    3 * self.tube_diameter,
+                                                                    ensure_closed=True)
 
-        wire = FCPart.Wire(cutted_face.SubShapes[1].OuterWire)
-        if not wire.isClosed():
-            wire = FCPart.Wire([*wire.OrderedEdges,
-                                FCPart.LineSegment(wire.OrderedVertexes[-1].Point,
-                                                   wire.OrderedVertexes[0].Point).toShape()])
+        # wire = splitted_inner_face_wire
+        if not splitted_inner_face_wire.isClosed():
+            splitted_inner_face_wire = FCPart.Wire([*splitted_inner_face_wire.OrderedEdges,
+                                                    FCPart.LineSegment(splitted_inner_face_wire.OrderedVertexes[-1].Point,
+                                                                       splitted_inner_face_wire.OrderedVertexes[0].Point).toShape()])
 
         # add edges:
         logger.info(f'Adding edges to mesh {self.construction_mesh.mesh.name}')
-        for edge in [*wire.Edges, *cutted_face.SubShapes[0].Edges]:
+        for edge in [*splitted_inner_face_wire.Edges, *splitted_ref_face_wire.Edges]:
             if type(edge.Curve) is FCPart.Arc:
                 BlockMeshEdge.from_fc_edge(fc_edge=edge,
                                            mesh=self.construction_mesh.mesh)
 
         logger.info(f'Creating hex mesh for free faces')
-        quad_meshes = [Face(fc_face=x).create_hex_g_mesh_2(lc=9999999999) for x in [cutted_face.SubShapes[0],
-                                                                                    FCPart.Face(wire)]]
+        quad_meshes = [Face(fc_face=x).create_hex_g_mesh_2(lc=500) for x in [FCPart.Face(splitted_ref_face_wire),
+                                                                             FCPart.Face(splitted_inner_face_wire)]]
+        quad_meshes[0].write('/tmp/mesh1.vtk')
+        quad_meshes[1].write('/tmp/mesh2.vtk')
         logger.info(f'Extruding blocks for free faces mesh')
         free_blocks = create_blocks_from_2d_mesh(quad_meshes, self, mesh_to_add=mesh)
 
@@ -371,7 +376,7 @@ class ActivatedReferenceFace(ReferenceFace):
         # export_objects([free_comp_block.fc_solid], '/tmp/free_comp_block.FCStd')
 
         self.pipe_layer.meshes.add(self.construction_mesh)
-
+        # export_objects([x.fc_solid for x in free_blocks], '/tmp/free_blocks.FCStd')
         logger.info(f'Successfully created free block mesh for {self.name}, {self.id}')
         return free_comp_block
 
