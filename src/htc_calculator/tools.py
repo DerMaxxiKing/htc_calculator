@@ -1003,21 +1003,26 @@ def calc_d(l_e, beta, radius):
     return abs(d)
 
 
-def split_wire_by_projected_vertices(wire, vertices, dist, ensure_closed=False):
+def split_wire_by_projected_vertices(wire, vertices, dist, min_dist=0, ensure_closed=False, add_arc_midpoint=True):
 
     cutted_ref_face_edges = []
     for edge in wire.OrderedEdges:
         edge_parameters = [edge.FirstParameter, edge.LastParameter]
         split_parameters = []
         for vertex in vertices:
-            if vertex.distToShape(edge)[0] <= dist:
+            dist_to_vert = vertex.distToShape(edge)[0]
+            if (dist_to_vert <= dist) and (dist_to_vert >= min_dist):
                 parameter = edge.Curve.parameter(Base.Vector(project_point_on_line(vertex.Point, edge)))
                 if (parameter not in edge_parameters) and (edge.FirstParameter < parameter < edge.LastParameter):
                     split_parameters.append(parameter)
+
+        if add_arc_midpoint:
+            if isinstance(edge.Curve, FCPart.BSplineCurve) or isinstance(edge.Curve, FCPart.Circle):
+                split_parameters.append(edge.FirstParameter + 0.5 * (edge.LastParameter - edge.FirstParameter))
         split_parameters = sorted(list(set(split_parameters)))
         split_parameters = [x for x in split_parameters if
-                            ((x - edge.FirstParameter) > 100 and (edge.LastParameter - x) > 100)]
-
+                            ((x - edge.FirstParameter) > 0.1 and (edge.LastParameter - x) > 0.1)]
+        #
         # try:
         #     if split_parameters:
         #         cutted_ref_face_edges.extend(edge.split(split_parameters).Edges)
@@ -1032,7 +1037,28 @@ def split_wire_by_projected_vertices(wire, vertices, dist, ensure_closed=False):
                     new_vertices = [edge.Vertex1, *[FCPart.Vertex(edge.valueAt(x)) for x in split_parameters], edge.Vertex2]
                     new_edges = [FCPart.LineSegment(new_vertices[i].Point, new_vertices[i+1].Point).toShape() for i in range(new_vertices.__len__()-1)]
                 else:
-                    raise NotImplementedError
+                    if isinstance(edge.Curve, FCPart.BSplineCurve):
+                        arcs = edge.Curve.toBiArcs(100)
+                        center = arcs[0].Center
+                        radius = arcs[0].Radius
+                    elif isinstance(edge.Curve, FCPart.Circle):
+                        center = edge.Center
+                        radius = edge.Radius
+                    else:
+                        raise NotImplementedError(f'Not implemented for type {edge.Curve}')
+
+                    new_vertices = [edge.Vertex1, *[FCPart.Vertex(edge.valueAt(x)) for x in split_parameters],
+                                    edge.Vertex2]
+
+                    new_edges = []
+                    for i in range(new_vertices.__len__() - 1):
+                        new_edges.append(FCPart.Edge(
+                            FCPart.Arc(
+                                new_vertices[i].Point,
+                                ((new_vertices[i].Point - center) + (new_vertices[i+1].Point - center)).normalize() * radius + center,
+                                new_vertices[i+1].Point)
+                            )
+                        )
 
                 cutted_ref_face_edges.extend(new_edges)
 
@@ -1096,7 +1122,15 @@ def create_new_edges(edges):
             new_edges[i] = FCPart.Edge(
                 FCPart.Arc(
                     v0.Point,
-                    ((v0.Point - arcs[0].Center) + (v1.Point - arcs[0].Center)).normalize() * arcs[0].Radius + v0.Point,
+                    ((v0.Point - arcs[0].Center) + (v1.Point - arcs[0].Center)).normalize() * arcs[0].Radius + arcs[0].Center,
+                    v1.Point)
+            )
+        elif isinstance(edge.Curve, FCPart.Circle):
+            new_edges[i] = FCPart.Edge(
+                FCPart.Arc(
+                    v0.Point,
+                    ((v0.Point - edge.Curve.Center) + (v1.Point - edge.Curve.Center)).normalize() * edge.Curve.Radius +
+                    edge.Curve.Center,
                     v1.Point)
             )
         else:

@@ -1706,7 +1706,9 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         if self.faces.__len__() == 0:
             return None
 
-        faces_entry = "\n".join(['\t\t\t(' + ' '.join([str(y.txt_id) for y in x.vertices]) + ')' for x in self.faces])
+        faces_entry = "\n".join(['\t\t\t(' + ' '.join([str(y.txt_id) for y in x.vertices]) +
+                                 ')' +
+                                 f'\t//{x.id}' for x in self.faces])
 
         # return (f"\t{self.txt_id + '_' + self.name}\n"
         #         f"\t{'{'}\n"
@@ -1769,7 +1771,9 @@ class CyclicAMI(BlockMeshBoundary):
         if self.faces.__len__() == 0:
             return None
 
-        faces_entry = "\n".join(['\t\t\t(' + ' '.join([str(y.txt_id) for y in x.vertices]) + ')' for x in self.faces])
+        faces_entry = "\n".join(['\t\t\t(' + ' '.join([str(y.txt_id) for y in x.vertices]) +
+                                 ')' +
+                                 f'\t//{x.id}'for x in self.faces])
 
         # return (f"\t{self.txt_id + '_' + self.name}\n"
         #         f"\t{'{'}\n"
@@ -4279,6 +4283,7 @@ class BlockMesh(object):
             output = res.stdout.decode('ascii')
             if output.find('FOAM FATAL ERROR') != -1:
                 logger.error(f'Error Creating block mesh:\n\n{output}')
+
                 if retry:
                     if output.find('Inconsistent number of faces') != -1:
                         items = findall("Inconsistent number of faces.*$", output, MULTILINE)

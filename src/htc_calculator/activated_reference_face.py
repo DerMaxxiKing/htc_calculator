@@ -320,10 +320,23 @@ class ActivatedReferenceFace(ReferenceFace):
 
         logger.info(f'Splitting wire with projected edges')
         # cutted_face = ref_face2.cut(Block.comp_solid)
+
+        jump3_wire0 = ref_face2.OuterWire.makeOffset2D(-self.tube_edge_distance - 0.5 * self.tube_diameter,
+                                                       join=1,
+                                                       openResult=False,
+                                                       intersection=False)
+
+        # export_objects([jump3_wire0, ref_face2.OuterWire], '/tmp/wires.FCStd')
+
+        vertexes = [x for x in cutted_face.SubShapes[0].OuterWire.Vertexes if x.distToShape(jump3_wire0)[0] < self.tube_diameter]
+
+        # export_objects(vertexes, '/tmp/vertexes.FCStd')
+
         splitted_ref_face_wire = split_wire_by_projected_vertices(cutted_face.SubShapes[0].OuterWire,
-                                                                  [*cutted_face.SubShapes[0].OuterWire.Vertexes],
+                                                                  vertexes,
                                                                   self.tube_edge_distance,
-                                                                  ensure_closed=True)
+                                                                  ensure_closed=True,
+                                                                  add_arc_midpoint=False)
         # splitted_ref_face_wire = cutted_face.SubShapes[0].OuterWire
         # cutted_ref_face = FCPart.Face(splitted_ref_face_wire).translate(mv_vec)
         # cutted_face = cutted_ref_face.cut(self.pipe_comp_blocks.fc_solid)
@@ -343,13 +356,13 @@ class ActivatedReferenceFace(ReferenceFace):
 
         # add edges:
         logger.info(f'Adding edges to mesh {self.construction_mesh.mesh.name}')
-        for edge in [*splitted_inner_face_wire.Edges, *splitted_ref_face_wire.Edges]:
-            if type(edge.Curve) is FCPart.Arc:
-                BlockMeshEdge.from_fc_edge(fc_edge=edge,
-                                           mesh=self.construction_mesh.mesh)
+        # for edge in [*splitted_inner_face_wire.Edges, *splitted_ref_face_wire.Edges]:
+        #     if type(edge.Curve) is FCPart.Arc:
+        #         BlockMeshEdge.from_fc_edge(fc_edge=edge,
+        #                                    mesh=self.construction_mesh.mesh)
 
         logger.info(f'Creating hex mesh for free faces')
-        quad_meshes = [Face(fc_face=x).create_hex_g_mesh_2(lc=500) for x in [FCPart.Face(splitted_ref_face_wire),
+        quad_meshes = [Face(fc_face=x).create_hex_g_mesh_2(lc=99999999) for x in [FCPart.Face(splitted_ref_face_wire),
                                                                              FCPart.Face(splitted_inner_face_wire)]]
         quad_meshes[0].write('/tmp/mesh1.vtk')
         quad_meshes[1].write('/tmp/mesh2.vtk')
@@ -619,6 +632,9 @@ class ActivatedReferenceFace(ReferenceFace):
         _ = self.pipe_comp_blocks
         _ = self.free_comp_blocks
         _ = self.layer_meshes
+
+        self.pipe_mesh.init_case()
+        self.pipe_mesh.run_block_mesh()
 
         for i, layer in enumerate(self.component_construction.layers):
 
