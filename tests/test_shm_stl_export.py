@@ -43,8 +43,8 @@ rockwool = Solid(name='rockwool',
                  specific_heat_capacity=840,
                  heat_conductivity=0.034)
 
-plaster = Solid(name='plaster',
-                density=1500,
+plaster = Solid(name='Normalputzmörtel',
+                density=1300,
                 specific_heat_capacity=960,
                 heat_conductivity=0.60)
 
@@ -108,7 +108,7 @@ case = OFCase(reference_face=tabs1,
 
 tabs1.case = case
 
-case.run_with_separate_meshes()
+case.run_with_separate_meshes2()
 
 #
 # tabs1.generate_reference_geometry()

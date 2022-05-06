@@ -154,6 +154,7 @@ class ActivatedReferenceFace(ReferenceFace):
         self.pipe = PipeSolid(reference_face=self,
                               reference_edge_id=self.reference_edge_id,
                               tube_diameter=self.tube_diameter,
+                              tube_inner_diameter=self.tube_inner_diameter,
                               tube_distance=self.tube_distance,
                               tube_side_1_offset=self.tube_side_1_offset,
                               tube_edge_distance=self.tube_edge_distance,
@@ -296,16 +297,16 @@ class ActivatedReferenceFace(ReferenceFace):
 
         mesh.activate()
 
-        pipe_interface_edges = set()
+        # pipe_interface_edges = set()
 
         # copy edges and faces of interfaces to pipe_mesh to construction_mesh
         # copy edges
-        logger.info(f'Copy interfaces to {mesh}')
-        _ = [pipe_interface_edges.update(x.edges) for x in self.pipe_mesh.interfaces]
-        BlockMeshEdge.copy_to_mesh(edges=pipe_interface_edges, mesh=mesh)
+        # logger.info(f'Copy interfaces to {mesh}')
+        # _ = [pipe_interface_edges.update(x.edges) for x in self.pipe_mesh.interfaces]
+        # BlockMeshEdge.copy_to_mesh(edges=pipe_interface_edges, mesh=mesh)
 
         # copy faces
-        self.construction_mesh.interfaces = BlockMeshFace.copy_to_mesh(faces=self.pipe_mesh.interfaces, mesh=mesh)
+        # self.construction_mesh.interfaces = BlockMeshFace.copy_to_mesh(faces=self.pipe_mesh.interfaces, mesh=mesh)
 
         # comp_solid = Block.comp_solid
 
@@ -346,7 +347,8 @@ class ActivatedReferenceFace(ReferenceFace):
         splitted_inner_face_wire = split_wire_by_projected_vertices(cutted_face.SubShapes[1].OuterWire,
                                                                     cutted_face.SubShapes[1].OuterWire.Vertexes,
                                                                     3 * self.tube_diameter,
-                                                                    ensure_closed=True)
+                                                                    ensure_closed=True,
+                                                                    add_arc_midpoint=True)
 
         # wire = splitted_inner_face_wire
         if not splitted_inner_face_wire.isClosed():
@@ -356,10 +358,20 @@ class ActivatedReferenceFace(ReferenceFace):
 
         # add edges:
         logger.info(f'Adding edges to mesh {self.construction_mesh.mesh.name}')
-        # for edge in [*splitted_inner_face_wire.Edges, *splitted_ref_face_wire.Edges]:
-        #     if type(edge.Curve) is FCPart.Arc:
-        #         BlockMeshEdge.from_fc_edge(fc_edge=edge,
-        #                                    mesh=self.construction_mesh.mesh)
+        for edge in [*splitted_inner_face_wire.Edges, *splitted_ref_face_wire.Edges]:
+            if isinstance(edge.Curve, FCPart.Arc) or isinstance(edge.Curve, FCPart.Circle):
+                offset0 = -np.array(self.normal * (self.tube_diameter / 2 / np.sqrt(2) + self.tube_diameter / 4))
+                dist = 2 * (self.tube_diameter / 2 / np.sqrt(2) + self.tube_diameter / 4)
+                direction = np.array(self.normal)
+                _ = BlockMeshEdge.from_fc_edge(fc_edge=edge,
+                                               mesh=mesh,
+                                               translate=offset0)
+
+                _ = BlockMeshEdge.from_fc_edge(fc_edge=edge,
+                                               mesh=mesh,
+                                               translate=dist * direction + offset0)
+
+        # export_objects([x.fc_edge for x in mesh.edges.values()], '/tmp/edges.FCStd')
 
         logger.info(f'Creating hex mesh for free faces')
         quad_meshes = [Face(fc_face=x).create_hex_g_mesh_2(lc=99999999) for x in [FCPart.Face(splitted_ref_face_wire),
@@ -632,9 +644,6 @@ class ActivatedReferenceFace(ReferenceFace):
         _ = self.pipe_comp_blocks
         _ = self.free_comp_blocks
         _ = self.layer_meshes
-
-        self.pipe_mesh.init_case()
-        self.pipe_mesh.run_block_mesh()
 
         for i, layer in enumerate(self.component_construction.layers):
 

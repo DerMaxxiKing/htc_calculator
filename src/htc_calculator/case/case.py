@@ -486,7 +486,12 @@ class OFCase(object):
 
         logger.debug('bla bla')
 
-    def run_with_separate_meshes(self):
+    def run_with_separate_meshes(self, export_geometry=True):
+
+        if export_geometry:
+            for solid in self.reference_face.assembly.solids:
+                solid.export_step(f'/tmp/cad/{solid.name}.step')
+            self.reference_face.assembly.export_stp(f'/tmp/cad/assembly.step')
         # _ = self.reference_face.pipe_comp_blocks
         # _ = self.reference_face.free_comp_blocks
         # # export_objects([self.reference_face.free_comp_blocks.fc_solid], '/tmp/free_comp_blocks.FCStd')
@@ -622,7 +627,6 @@ class OFCase(object):
 
         logger.debug('bla bla')
 
-
         # logger.info('Adding cyclicAMI boundary condition to mesh interfaces')
         # block_meshes = [joined_pipe_layer_mesh,
         #                 *self.reference_face.layer_meshes]
@@ -655,6 +659,50 @@ class OFCase(object):
         #     block_mesh.run_block_mesh(run_parafoam=True)
         #
         # print('done')
+
+    def run_with_separate_meshes2(self):
+
+        # export CAD files:
+
+        for solid in self.reference_face.assembly.solids:
+            solid.export_step(f'/tmp/cad/{solid.name}.step')
+        self.reference_face.assembly.export_stp(f'/tmp/cad/assembly.step')
+
+        _ = self.reference_face.pipe_comp_blocks
+        _ = self.reference_face.free_comp_blocks
+        # export_objects([self.reference_face.free_comp_blocks.fc_solid], '/tmp/free_comp_blocks.FCStd')
+        _ = self.reference_face.layer_meshes
+
+        meshes = [self.reference_face.pipe_mesh,
+                  self.reference_face.construction_mesh,
+                  *self.reference_face.layer_meshes]
+
+        blocks = []
+        _ = [blocks.extend(x.mesh.blocks) for x in meshes]
+        self.reference_face.update_cell_zone(blocks=blocks)
+
+        for mesh in meshes:
+            mesh.init_case()
+            mesh.run_block_mesh()
+            if mesh is self.reference_face.pipe_mesh:
+                mesh.run_split_mesh_regions()
+            mesh.run_check_mesh()
+            mesh.run_parafoam()
+
+        empty_mesh = BlockMesh(name='combined_mesh',
+                               mesh=Mesh(name='combined_mesh'),
+                               case_dir=self.case_dir)
+        empty_mesh.init_case()
+        empty_mesh.run_block_mesh()
+
+        for mesh in meshes:
+            empty_mesh.merge_mesh(mesh, overwrite=True, add_ami=False)
+
+        self.run_split_mesh_regions()
+        empty_mesh.run_parafoam()
+
+        print('done')
+
 
 
 def execute(command, cwd):

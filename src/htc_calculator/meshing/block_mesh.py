@@ -38,8 +38,8 @@ from ..case import case_resources
 App = FreeCAD
 
 
-default_cell_size = 50
-default_arc_cell_size = 10
+default_cell_size = 25
+default_arc_cell_size = 5
 
 
 def np_cache(function):
@@ -82,6 +82,10 @@ class Mesh(object, metaclass=MeshMetaMock):
     instances = {}
 
     def __init__(self, *args, **kwargs):
+
+        self.default_cell_size = kwargs.get('default_cell_size', 25)
+        self.default_arc_cell_size = kwargs.get('default_arc_cell_size', 10)
+
         self.id = kwargs.get('id', uuid.uuid4())
         self.name = kwargs.get('name', 'unnamed_mesh')
 
@@ -1248,25 +1252,28 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
     arc_cell_factor = 2
 
     @classmethod
-    def from_fc_edge(cls, fc_edge, mesh=None, num_cells=None, fixed_num_cells=False):
+    def from_fc_edge(cls, fc_edge, mesh=None, num_cells=None, fixed_num_cells=False, translate=np.array([0, 0, 0])):
         if mesh is None:
             mesh = cls.current_mesh
 
-        if type(fc_edge.Curve) is FCPart.Arc:
-            interpolation_point = BlockMeshVertex(position=np.array([1]))
-            type='arc'
+        if isinstance(fc_edge.Curve, FCPart.Circle) or isinstance(fc_edge.Curve, FCPart.Arc):
+            interpolation_points = [np.array(((fc_edge.Vertex1.Point - fc_edge.Curve.Center)
+                                              + (fc_edge.Vertex2.Point - fc_edge.Curve.Center)).normalize()
+                                             * fc_edge.Curve.Radius + fc_edge.Curve.Center) + translate]
+            edge_type = 'arc'
         else:
-            type='line'
+            edge_type = 'line'
             interpolation_points = None
 
-        p0 = BlockMeshVertex(position=np.array([1]))
-        p1 = BlockMeshVertex(position=np.array([1]))
+        p0 = BlockMeshVertex(position=np.array(fc_edge.Vertex1.Point) + translate)
+        p1 = BlockMeshVertex(position=np.array(fc_edge.Vertex2.Point) + translate)
 
         return cls(mesh=mesh,
                    vertices=[p0, p1],
-                   type=type,
+                   type=edge_type,
                    fixed_num_cells=fixed_num_cells,
-                   num_cells=num_cells
+                   num_cells=num_cells,
+                   interpolation_points=interpolation_points
                    )
 
     @classmethod
@@ -1311,7 +1318,7 @@ class BlockMeshEdge(object, metaclass=EdgeMetaMock):
         # number cells:
         self.fixed_num_cells = kwargs.get('fixed_num_cells', False)
         self.num_cells = kwargs.get('num_cells', None)
-        self.cell_size = kwargs.get('cell_size', default_cell_size)
+        self.cell_size = kwargs.get('cell_size', self.mesh.default_cell_size)
 
         self.vertices[0].edges.add(self)
         self.vertices[1].edges.add(self)
@@ -1495,7 +1502,7 @@ class ParallelEdgesSet(object, metaclass=ParallelEdgeSetMetaMock):
                     if (instance.edges & next_instance.edges).__len__() > 0:
                         instance.edges.update(next_instance.edges)
                         _ = [setattr(x, 'parallel_edge_set', instance) for x in next_instance.edges]
-                        instance._cell_size = default_cell_size
+                        instance._cell_size = instance.mesh.default_cell_size
                         instance._num_cells = None
                         new_pe_set = copy.copy(current_pe_set)
                         new_pe_set.remove(next_instance)
@@ -1518,9 +1525,10 @@ class ParallelEdgesSet(object, metaclass=ParallelEdgeSetMetaMock):
 
         self.id = next(ParallelEdgesSet.id_iter)
         self.dict_id = next(ParallelEdgesSet.dict_id_iter)
+        self.mesh = kwargs.get('mesh')
 
         self.edges = kwargs.get('edges', set())
-        self._cell_size = kwargs.get('cell_size', default_cell_size)
+        self._cell_size = kwargs.get('cell_size', self.mesh.default_cell_size)
         self._num_cells = kwargs.get('num_cells', None)
 
         self.mesh = kwargs.get('mesh')
@@ -1561,10 +1569,6 @@ class ParallelEdgesSet(object, metaclass=ParallelEdgeSetMetaMock):
     @num_cells.setter
     def num_cells(self, value: int):
         if self._num_cells is value:
-            return
-
-        if self._num_cells > value:
-            logger.warning(f'Trying to set num cells value to a smaller one than existing')
             return
         self._num_cells = value
 
@@ -4065,8 +4069,8 @@ class BlockMesh(object):
             patch_pairs =PatchPair.instances
 
             # contacts = CompBlock.search_merge_patch_pairs()
-        logger.info(f'Updating parallel edges')
-        Block.update_parallel_edges(blocks=blocks)
+        # logger.info(f'Updating parallel edges')
+        # Block.update_parallel_edges(blocks=blocks)
 
         logger.info(f'Merging parallel edge sets')
         ParallelEdgesSet.merge_sets(pe_sets=pe_sets)
@@ -4170,6 +4174,24 @@ class BlockMesh(object):
             logger.error(f"{res.stderr.decode('ascii')}")
             raise Exception(f"Error blockTopology vtk:\n{res.stderr.decode('ascii')}")
 
+    def run_check_mesh(self):
+        logger.info(f'Checking mesh....')
+        res = subprocess.run(
+            ["/bin/bash", "-i", "-c", "checkMesh 2>&1 | tee checkMesh.log"],
+            capture_output=True,
+            cwd=self.case_dir,
+            user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            if output.find('FOAM FATAL ERROR') != -1:
+                logger.error(f'Error decomposePar:\n\n{output}')
+                raise Exception(f'Error decomposePar:\n\n{output}')
+            logger.info(f"Successfully ran checkMesh \n\n{output}")
+        else:
+            logger.error(f"{res.stderr.decode('ascii')}")
+
+        return True
+
     def run_parafoam(self, case_dir=None):
 
         if case_dir is None:
@@ -4257,6 +4279,24 @@ class BlockMesh(object):
                     logger.error(f"Error Merging meshes:\n{res.stderr.decode('ascii')}")
 
         pass
+
+    def run_split_mesh_regions(self):
+        logger.info(f'Splitting Mesh Regions....')
+        res = subprocess.run(
+            ["/bin/bash", "-i", "-c", "splitMeshRegions -cellZonesOnly -overwrite 2>&1 | tee splitMeshRegions.log"],
+            capture_output=True,
+            cwd=self.case_dir,
+            user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            if output.find('FOAM FATAL ERROR') != -1:
+                logger.error(f'Error splitting Mesh Regions:\n\n{output}')
+                raise Exception(f'Error splitting Mesh Regions:\n\n{output}')
+            logger.info(f"Successfully splitted Mesh Regions \n\n{output}")
+        else:
+            logger.error(f"{res.stderr.decode('ascii')}")
+
+        return True
 
     def run_block_mesh(self, case_dir=None, retry=False, export_block_topology=False, run_parafoam=False):
         """

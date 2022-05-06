@@ -128,6 +128,9 @@ class Solid(object):
     def export_step(self, filename):
         logger.debug(f'exporting .stp for solid {self.id}')
 
+        path = os.path.dirname(filename)
+        os.makedirs(path, exist_ok=True)
+
         try:
             from .tools import name_step_faces
 
@@ -329,6 +332,7 @@ class PipeSolid(Solid):
         self.reference_edge_id = kwargs.get('reference_edge_id', 0)
 
         self.tube_diameter = kwargs.get('tube_diameter', 0.02)
+        self.tube_inner_diameter = kwargs.get('tube_inner_diameter', 0.016)
         self.tube_distance = kwargs.get('tube_distance', 0.50)
         self.tube_side_1_offset = kwargs.get('tube_side_1_offset', 0.085)
         self.tube_edge_distance = kwargs.get('tube_edge_distance', 0.50)
@@ -600,12 +604,18 @@ class PipeSolid(Solid):
 
         logger.info(f'Creating solid for pipe {self.name} {self.id}')
 
-        pipe_shape = create_pipe(self.pipe_wire.Edges, self.tube_diameter, self.reference_face.normal)
-
         hull = self.reference_face.plain_reference_face_solid.assembly.hull
+
+        pipe_shape = create_pipe(self.pipe_wire.Edges, self.tube_inner_diameter, self.reference_face.normal)
+        initial_tube_wall = create_pipe(self.pipe_wire.Edges, self.tube_diameter, self.reference_face.normal)
+        tube_wall = initial_tube_wall.cut(pipe_shape).common(hull.fc_solid.Shape)
+
+        # export_objects([tube_wall, pipe_shape], '/tmp/tube_wall.FCStd')
+
         inlet_outlet = hull.fc_solid.Shape.Shells[0].common(pipe_shape)
 
-        # export_objects([hull.fc_solid.Shape, pipe_shape], '/tmp/to_intersect.FCStd')
+
+
 
         if inlet_outlet.SubShapes.__len__() == 2:
             inlet = Face(fc_face=inlet_outlet.SubShapes[0].removeSplitter(),
@@ -633,15 +643,18 @@ class PipeSolid(Solid):
             logger.info(f'Updating layer solid {i+1} of {self.reference_face.assembly.solids.__len__()}: '
                         f'{solid.name} {solid.id}')
 
-            common = solid.fc_solid.Shape.common(pipe)
+            common = solid.fc_solid.Shape.common(initial_tube_wall)
             if common.Faces:
                 new_faces = []
                 for face in solid.faces:
-                    new_face = Face(fc_face=face.fc_face.cut(pipe))
+                    new_face = Face(fc_face=face.fc_face.cut(initial_tube_wall))
                     new_faces.append(new_face)
                     solid.update_face(face, new_face)
                 solid.generate_solid_from_faces()
-                pipe_interface = Face(fc_face=solid.fc_solid.Shape.common(pipe).Shells[0],
+                # export_objects([solid.fc_solid.Shape], '/tmp/solid.FCStd')
+                # export_objects([common], '/tmp/common.FCStd')
+
+                pipe_interface = Face(fc_face=solid.fc_solid.Shape.common(initial_tube_wall).Shells[0],
                                       name=f'Pipe interface',
                                       linear_deflection=0.5,
                                       angular_deflection=0.5)
@@ -653,9 +666,16 @@ class PipeSolid(Solid):
                 solid.features['pipe_faces'] = pipe_interface
 
         # generate pipe solid
-        pipe_solid = Solid(faces=[inlet, outlet, *layer_pipe_interfaces],
+        pipe_solid = Solid(faces=[inlet, outlet, *[Face(fc_face=x) for x in pipe_faces.Faces]],
                            name='PipeSolid')
         pipe_solid.generate_solid_from_faces()
+
+        pipe_wall_solid = Solid(faces=[Face(fc_face=x) for x in tube_wall.Solids[0].Faces],
+                                name='PipeWallSolid')
+        pipe_wall_solid.generate_solid_from_faces()
+
+        export_objects(tube_wall, '/tmp/pipe_wall_solid.FCStd')
+        export_objects(pipe_solid.fc_solid.Shape, '/tmp/pipe_solid.FCStd')
 
         pipe_solid.features['inlet'] = inlet
         pipe_solid.features['outlet'] = outlet
@@ -665,7 +685,9 @@ class PipeSolid(Solid):
         logger.info(f'Updating assembly of reference face {self.reference_face.name} {self.reference_face.id}')
 
         self.reference_face.assembly.solids.append(pipe_solid)
+        self.reference_face.assembly.solids.append(pipe_wall_solid)
         self.reference_face.assembly.features['pipe'] = pipe_solid
+        self.reference_face.assembly.features['pipe_wall_solid'] = pipe_wall_solid
 
         self.reference_face.assembly.faces.extend([inlet, outlet, *layer_pipe_interfaces])
         self.reference_face.assembly.interfaces.extend(layer_pipe_interfaces)
