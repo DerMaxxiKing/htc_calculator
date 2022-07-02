@@ -1,10 +1,12 @@
-import numpy as np
 from src.htc_calculator.activated_reference_face import ActivatedReferenceFace
 from src.htc_calculator.construction import Solid, Layer, ComponentConstruction
 from src.htc_calculator.buildin_materials import water, aluminium
 from src.htc_calculator.meshing.buildin_pipe_sections.tube_with_wall_optimized import pipe_section
 from src.htc_calculator import OFCase, TabsBC
 from src.htc_calculator import config
+
+import numpy as np
+
 
 from src.htc_calculator.logger import logger
 logger.setLevel('INFO')

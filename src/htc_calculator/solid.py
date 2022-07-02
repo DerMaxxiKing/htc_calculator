@@ -7,12 +7,13 @@ from io import StringIO
 import re
 import numpy as np
 import trimesh
-from pyobb.obb import OBB
 from scipy.spatial import ConvexHull
 
 from .meshing.surface_mesh_parameters import default_surface_mesh_parameter
 from .face import Face
 from .tools import export_objects, add_radius_to_edges, vector_to_np_array, perpendicular_vector, extrude, create_pipe, create_pipe_wire, add_radius_to_edges
+from .config import work_dir
+from .meshing import meshing_resources
 
 from .logger import logger
 
@@ -33,6 +34,7 @@ class Solid(object):
     def __init__(self, *args, **kwargs):
         self.id = kwargs.get('id', uuid.uuid4())
         self.type = kwargs.get('type', None)
+        self.base_directory = kwargs.get('base_directory', os.path.join(work_dir, self.txt_id))
         # logger.debug(f'initializing solid {self.id}')
         self.name = kwargs.get('name', None)
         self.normal = kwargs.get('normal', None)
@@ -42,6 +44,7 @@ class Solid(object):
         self.features = kwargs.get('features', {})
         self.surface_mesh_setup = kwargs.get('_surface_mesh_setup',
                                              kwargs.get('surface_mesh_setup', default_surface_mesh_parameter))
+        self._base_block_mesh = kwargs.get('base_block_mesh', None)
         self.layer = kwargs.get('layer', None)
 
         self.state = kwargs.get('state', 'solid')
@@ -92,6 +95,12 @@ class Solid(object):
     @property
     def face_names(self):
         return [str(x.id) for x in self.faces]
+
+    @property
+    def base_block_mesh(self):
+
+        if self._base_block_mesh is None:
+            self._base_block_mesh = self.create_base_block_mesh(self.base_directory)
 
     def update_face(self, face, new_face):
 
@@ -184,18 +193,24 @@ class Solid(object):
     def generate_faces_from_solid(self, solid):
         pass
 
-    def write_of_geo(self, directory):
-        stl_str = ''.join([x.create_stl_str(of=True) for x in set(self.faces) - set(self.interfaces)])
+    def write_of_geo(self, directory, separate_interface=True):
+
+        if separate_interface:
+            stl_str = ''.join([x.create_stl_str(of=True) for x in set(self.faces) - set(self.interfaces)])
+        else:
+            stl_str = ''.join([x.create_stl_str(of=True) for x in set(self.faces)])
+
         new_file = open(os.path.join(directory, str(self.txt_id) + '.stl'), 'w')
         new_file.writelines(stl_str)
         new_file.close()
 
-        for interface in self.interfaces:
-            interface_path = os.path.join(directory, str(interface.txt_id) + '.stl')
-            if not os.path.exists(interface_path):
-                new_file = open(interface_path, 'w')
-                new_file.writelines(interface.create_stl_str(of=True))
-                new_file.close()
+        if separate_interface:
+            for interface in self.interfaces:
+                interface_path = os.path.join(directory, str(interface.txt_id) + '.stl')
+                if not os.path.exists(interface_path):
+                    new_file = open(interface_path, 'w')
+                    new_file.writelines(interface.create_stl_str(of=True))
+                    new_file.close()
 
     @property
     def shm_geo_entry(self, offset=0):
@@ -270,6 +285,7 @@ class Solid(object):
             return location_in_mesh
 
     def calc_obb(self):
+        from pyobb.obb import OBB
         pts = np.stack([np.array([x.X, x.Y, x.Z]) for x in self.fc_solid.Shape.Vertexes], axis=0)
         hull = ConvexHull(pts)
         hullpts = [pts[i] for i in hull.vertices]
@@ -316,9 +332,52 @@ class Solid(object):
     def is_inside(self, vec: Base.Vector):
         return self.fc_solid.Shape.isInside(vec, 0, True)
 
+    def create_shm_mesh(self, directory=None):
+
+        if directory is None:
+            directory = self.base_directory
+
+        self.create_base_block_mesh(directory=directory)
+
+        geo_dir = os.path.join(directory, 'constant', 'geometry')
+        os.makedirs(directory, exist_ok=True)
+        self.write_of_geo(geo_dir, separate_interface=False)
+
+
+
+    def create_base_block_mesh(self, directory=None):
+
+        if directory is None:
+            directory = self.base_directory
+
+        logger.info(f'Creating block mesh for solid: {self.txt_id}')
+
+        from .meshing.block_mesh import BlockMesh, Mesh, Block, BlockMeshVertex
+        block_mesh = BlockMesh(case_dir=directory,
+                               name='Block Mesh ' + self.txt_id,
+                               mesh=Mesh(name=self.txt_id))
+
+        block_mesh.mesh.activate()
+
+        vertices = [BlockMeshVertex(position=x) for x in self.obb.vertices]
+
+        new_block = Block(vertices=vertices,
+                          name=self.txt_id + 'base block',
+                          auto_cell_size=True,
+                          extruded=False,
+                          grading=[1, 1, 1],
+                          mesh=block_mesh.mesh)
+
+        os.makedirs(directory, exist_ok=True)
+        block_mesh.init_case()
+        block_mesh.run_block_mesh()
+        logger.info(f'Successfully created block mesh for solid: {self.txt_id}')
+
     def __repr__(self):
         rep = f'Solid {self.name} {self.id} {self.Volume}'
         return rep
+
+
 
 
 class PipeSolid(Solid):

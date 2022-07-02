@@ -704,7 +704,6 @@ class OFCase(object):
         print('done')
 
 
-
 def execute(command, cwd):
     p = Popen(command, stdin=PIPE, stdout=PIPE, stderr=STDOUT, cwd=cwd)
     for line in p.stdout:

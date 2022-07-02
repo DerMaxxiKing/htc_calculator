@@ -1,0 +1,31 @@
+FROM opencfd/openfoam-run:latest
+
+WORKDIR /app
+
+# start with more uptodate packages
+RUN apt-get update \
+    && apt-get -y --no-install-recommends install software-properties-common wget curl \
+    && add-apt-repository ppa:deadsnakes/ppa -y \
+    && apt update \
+    && apt-get -y --no-install-recommends install python3.9 python3.9-distutils\
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1 \
+    && curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py  \
+    && python3.9 get-pip.py \
+    && rm -rf /var/lib/apt/lists/*
+
+# freecad
+RUN wget https://github.com/FreeCAD/FreeCAD/releases/download/0.19.3/FreeCAD_0.19.3-Linux-Conda_glibc2.12-x86_64.AppImage \
+   && chmod +x FreeCAD_0.19.3-Linux-Conda_glibc2.12-x86_64.AppImage \
+   && ./FreeCAD_0.19.3-Linux-Conda_glibc2.12-x86_64.AppImage --appimage-extract \
+   && rm FreeCAD_0.19.3-Linux-Conda_glibc2.12-x86_64.AppImage
+
+RUN apt-get update
+RUN apt-get -y --no-install-recommends install libgl1-mesa-glx libxcursor1 libxft2 libxinerama1 libglu1-mesa libgomp1
+RUN pip3 install gmsh
+
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/app/squashfs-root/usr/lib/
+ENV FreeCADPath="/app/squashfs-root/usr/lib/"
+
+ENV PYTHONPATH="${PYTHONPATH}:/app/squashfs-root/usr/lib/python3.9/site-packages/:/app/squashfs-root/usr/lib/"
+
+WORKDIR /
