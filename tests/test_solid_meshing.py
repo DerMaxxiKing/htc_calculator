@@ -45,5 +45,6 @@ os.mkdir(os.path.join(mesh_path, 'constant'))
 os.mkdir(os.path.join(mesh_path, 'system'))
 
 solid_0.create_base_block_mesh()
+solid_0.create_shm_mesh()
 
 print('done')

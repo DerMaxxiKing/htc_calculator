@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 import re
 from copy import deepcopy
+import subprocess
 
 
 try:
@@ -16,6 +17,7 @@ except ImportError:
 from . import meshing_resources as msh_resources
 from .mesh_quality import MeshQuality, default_mesh_quality
 from .layer_definition import default_layer_definition
+from ..logger import logger
 
 
 def to_of_dict_format(parameter):
@@ -37,6 +39,31 @@ def to_of_dict_format(parameter):
 
     else:
         return ''
+
+
+def run_shm(case_dir):
+    logger.info(f'Generating mesh....')
+    res = subprocess.run(["/bin/bash", "-i", "-c", "snappyHexMesh"],
+                         capture_output=True,
+                         cwd=case_dir,
+                         user='root')
+    if res.returncode == 0:
+        output = res.stdout.decode('ascii')
+        if output.find('FOAM FATAL ERROR') != -1:
+            logger.error(f'Error running snappyHexMesh:\n\n{output}')
+
+        if output.find('FOAM FATAL IO ERROR') != -1:
+            logger.error(f'Error running snappyHexMesh:\n\n{output}')
+            raise Exception(f'Error running snappyHexMesh:\n\n{output}')
+
+        logger.info(f"Successfully created mesh:\n"
+                    f"Directory: {case_dir}\n\n "
+                    f"{output[output.find('Mesh Information'):]}")
+
+    else:
+        logger.error(f"{res.stderr.decode('ascii')}")
+        raise Exception(f"Error running snappyHexMesh:\n{res.stderr.decode('ascii')}")
+    return True
 
 
 class SnappyHexMesh(object):
@@ -534,27 +561,33 @@ class SnappyHexMesh(object):
 
         return parameter_str
 
-    def write_snappy_hex_mesh(self):
+    def write_snappy_hex_mesh(self, case_dir=None):
 
-        if self.case_dir is None:
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        if case_dir is None:
             logging.error(f'{self.name}: no case_dir')
             return
 
         # check if directory exists
-        os.makedirs(self.case_dir, exist_ok=True)
-        os.makedirs(os.path.join(self.case_dir, '0'), exist_ok=True)
-        os.makedirs(os.path.join(self.case_dir, 'constant'), exist_ok=True)
-        os.makedirs(os.path.join(self.case_dir, 'system'), exist_ok=True)
+        os.makedirs(case_dir, exist_ok=True)
+        os.makedirs(os.path.join(case_dir, '0'), exist_ok=True)
+        os.makedirs(os.path.join(case_dir, 'constant'), exist_ok=True)
+        os.makedirs(os.path.join(case_dir, 'system'), exist_ok=True)
 
-        dst = os.path.join(self.case_dir, 'system', 'snappyHexMeshDict')
+        dst = os.path.join(case_dir, 'system', 'snappyHexMeshDict')
         with open(dst, 'w') as shmd:
             shmd.write(self.snappy_hex_mesh_dict)
 
     def geom_string(self):
 
         # geo_str1 = ''.join(x.shm_geo_entry for x in self.assembly.solids)
-        geo_str1 = self.assembly.shm_geo_entry()
-        geo_str = geo_str1 + self.assembly.interface_shm_geo_entry()
+        geo_str1 = self.assembly.shm_geo_entry
+        if hasattr(self.assembly, 'interface_shm_geo_entry'):
+            geo_str = geo_str1 + self.assembly.interface_shm_geo_entry
+        else:
+            geo_str = geo_str1
 
         return geo_str
 
@@ -587,10 +620,14 @@ class SnappyHexMesh(object):
                 if parameter is None:
                     s += f'\t{value}\n' + '\t{\n\t}\n'
                     continue
-            if isinstance(value, str):
-                s += self.create_entry(attr=attr, key=value)
-            else:
-                s += self.create_entry(attr=attr, key=value['key'], value=value['value'])
+
+            try:
+                if isinstance(value, str):
+                    s += self.create_entry(attr=attr, key=value)
+                else:
+                    s += self.create_entry(attr=attr, key=value['key'], value=value['value'])
+            except Exception as e:
+                raise e
 
         s += '}\n'
 
@@ -620,7 +657,10 @@ class SnappyHexMesh(object):
 
         # refinement_str1 = ''.join(x.shm_refinement_entry for x in self.assembly.solids)
         refinement_str1 = self.assembly.shm_refinement_entry
-        refinement_str = refinement_str1 + self.assembly.interface_shm_refinement_entry
+        if hasattr(self.assembly, 'interface_shm_refinement_entry'):
+            refinement_str = refinement_str1 + self.assembly.interface_shm_refinement_entry
+        else:
+            refinement_str = refinement_str1
 
         self.refinement_surfaces = "\t{" + '\t'.join(('\n' + '\t' + refinement_str.lstrip()).splitlines(True)) + "\t}\n"
 
@@ -715,3 +755,13 @@ class SnappyHexMesh(object):
         lines.insert(lines.__len__() - 1, '\t'.join(('\n' + s.lstrip()).splitlines(True)))
 
         self.layer_setup = '\n'.join(lines)
+
+    def run(self, case_dir=None):
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        if case_dir is None:
+            logging.error(f'{self.name}: no case_dir')
+            return
+
+        run_shm(case_dir)

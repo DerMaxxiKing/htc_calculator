@@ -14,6 +14,7 @@ from .face import Face
 from .tools import export_objects, add_radius_to_edges, vector_to_np_array, perpendicular_vector, extrude, create_pipe, create_pipe_wire, add_radius_to_edges
 from .config import work_dir
 from .meshing import meshing_resources
+from random import random
 
 from .logger import logger
 
@@ -49,12 +50,27 @@ class Solid(object):
 
         self.state = kwargs.get('state', 'solid')
         self._obb = kwargs.get('obb', None)
+        self._location_in_mesh = kwargs.get('location_in_mesh', None)
 
     @property
     def obb(self):
         if self._obb is None:
             self.calc_obb()
         return self._obb
+
+    @property
+    def location_in_mesh(self):
+        if self._location_in_mesh is None:
+            self._location_in_mesh = self.get_location_in_mesh()
+        return self._location_in_mesh
+
+    @property
+    def locations_in_mesh(self):
+        s = '\n\t(\n'
+        s += f"\t\t(({self.point_in_mesh[0]} {self.point_in_mesh[1]} {self.point_in_mesh[2]}) {self.txt_id})\n"
+        s += '\t)'
+
+        return s
 
     @property
     def txt_id(self):
@@ -162,6 +178,18 @@ class Solid(object):
 
         logger.debug(f'    finished exporting .stp for solid {self.id}')
 
+    def get_location_in_mesh(self):
+
+        vec0 = self.fc_solid.Shape.CenterOfMass
+        vec = vec0
+
+        while not self.fc_solid.Shape.isInside(vec, 0, True):
+            vec = Base.Vector(random() * (self.fc_solid.Shape.BoundBox.XMax - self.fc_solid.Shape.BoundBox.XMin) + self.fc_solid.Shape.BoundBox.XMin,
+                              random() * (self.fc_solid.Shape.BoundBox.YMax - self.fc_solid.Shape.BoundBox.YMin) + self.fc_solid.Shape.BoundBox.YMin,
+                              random() * (self.fc_solid.Shape.BoundBox.ZMax - self.fc_solid.Shape.BoundBox.ZMin) + self.fc_solid.Shape.BoundBox.ZMin)
+
+        return np.array(vec)
+
     def generate_solid_from_faces(self):
 
         # logger.debug(f'generating solid from faces: {self.id}')
@@ -195,11 +223,14 @@ class Solid(object):
 
     def write_of_geo(self, directory, separate_interface=True):
 
+        logger.info(f'Writing OF geometry for solid: {self.txt_id} to {directory}')
+
         if separate_interface:
             stl_str = ''.join([x.create_stl_str(of=True) for x in set(self.faces) - set(self.interfaces)])
         else:
             stl_str = ''.join([x.create_stl_str(of=True) for x in set(self.faces)])
 
+        os.makedirs(directory)
         new_file = open(os.path.join(directory, str(self.txt_id) + '.stl'), 'w')
         new_file.writelines(stl_str)
         new_file.close()
@@ -212,13 +243,15 @@ class Solid(object):
                     new_file.writelines(interface.create_stl_str(of=True))
                     new_file.close()
 
+        logger.info(f'Successfully written OF geometry for solid: {self.txt_id} to {directory}')
+
     @property
     def shm_geo_entry(self, offset=0):
 
         local_offset = 4
         offset = offset + local_offset
 
-        solid_faces = set(self.faces) - set(self.interfaces)
+        solid_faces = self.faces
 
         buf = StringIO()
 
@@ -243,7 +276,7 @@ class Solid(object):
         local_offset = 4
         offset = offset + local_offset
 
-        hull_faces = set(self.faces) - set(self.interfaces)
+        hull_faces = self.faces
 
         buf = StringIO()
 
@@ -334,6 +367,8 @@ class Solid(object):
 
     def create_shm_mesh(self, directory=None):
 
+        from .meshing.snappy_hex_mesh import SnappyHexMesh
+
         if directory is None:
             directory = self.base_directory
 
@@ -341,7 +376,16 @@ class Solid(object):
 
         geo_dir = os.path.join(directory, 'constant', 'geometry')
         os.makedirs(directory, exist_ok=True)
+
         self.write_of_geo(geo_dir, separate_interface=False)
+
+        shm = SnappyHexMesh(assembly=self)
+        shm.write_snappy_hex_mesh(case_dir=directory)
+        shm.run(case_dir=directory)
+
+        print('done')
+
+
 
 
 
@@ -376,8 +420,6 @@ class Solid(object):
     def __repr__(self):
         rep = f'Solid {self.name} {self.id} {self.Volume}'
         return rep
-
-
 
 
 class PipeSolid(Solid):
