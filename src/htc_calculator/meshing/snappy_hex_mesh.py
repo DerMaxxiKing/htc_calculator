@@ -43,7 +43,7 @@ def to_of_dict_format(parameter):
 
 def run_shm(case_dir):
     logger.info(f'Generating mesh....')
-    res = subprocess.run(["/bin/bash", "-i", "-c", "snappyHexMesh"],
+    res = subprocess.run(["/bin/bash", "-i", "-c", "snappyHexMesh 2>&1 | tee snappyHexMesh.log"],
                          capture_output=True,
                          cwd=case_dir,
                          user='root')
@@ -530,6 +530,10 @@ class SnappyHexMesh(object):
             parameter_str = ''
 
             parameter = self.__getattribute__(attr)
+
+            if attr == 'location_in_mesh':
+                parameter = parameter / 1000
+
             if parameter is None:
                 return parameter_str
 
@@ -604,8 +608,7 @@ class SnappyHexMesh(object):
             'features': 'features',
             'refinement_surfaces': {'key': 'refinementSurfaces', 'value': '\t'.join(('\n' + self.refinement_surfaces.lstrip()).splitlines(True))},
             'refinement_regions': 'refinementRegions',
-            'location_in_mesh': 'locationInMesh',
-            'locations_in_mesh': 'locationsInMesh',
+            'location_in_mesh': 'locationInMesh'
         }
 
         s = '{\n'

@@ -259,6 +259,7 @@ class Solid(object):
         buf.write(f"{' ' * offset}{'{'}\n")
         buf.write(f"{' ' * (offset + 4)}type            triSurfaceMesh;\n")
         buf.write(f"{' ' * (offset + 4)}file            \"{str(self.txt_id)}.stl\";\n")
+        buf.write(f"{' ' * (offset + 4)}scale            0.001;\n")
         buf.write(f"{' ' * (offset + 4)}regions\n")
         buf.write(f"{' ' * (offset + 4)}{'{'}\n")
 
@@ -374,7 +375,7 @@ class Solid(object):
 
         self.create_base_block_mesh(directory=directory)
 
-        geo_dir = os.path.join(directory, 'constant', 'geometry')
+        geo_dir = os.path.join(directory, 'constant', 'triSurface')
         os.makedirs(directory, exist_ok=True)
 
         self.write_of_geo(geo_dir, separate_interface=False)
@@ -403,7 +404,17 @@ class Solid(object):
 
         block_mesh.mesh.activate()
 
-        vertices = [BlockMeshVertex(position=x) for x in self.obb.vertices]
+        block_vertices = np.array([
+            [self.obb.bounds[0, 0], self.obb.bounds[0, 1], self.obb.bounds[0, 2]],
+            [self.obb.bounds[0, 0], self.obb.bounds[1, 1], self.obb.bounds[0, 2]],
+            [self.obb.bounds[1, 0], self.obb.bounds[1, 1], self.obb.bounds[0, 2]],
+            [self.obb.bounds[1, 0], self.obb.bounds[0, 1], self.obb.bounds[0, 2]],
+            [self.obb.bounds[0, 0], self.obb.bounds[0, 1], self.obb.bounds[1, 2]],
+            [self.obb.bounds[0, 0], self.obb.bounds[1, 1], self.obb.bounds[1, 2]],
+            [self.obb.bounds[1, 0], self.obb.bounds[1, 1], self.obb.bounds[1, 2]],
+            [self.obb.bounds[1, 0], self.obb.bounds[0, 1], self.obb.bounds[1, 2]]])
+
+        vertices = [BlockMeshVertex(position=x) for x in block_vertices]
 
         new_block = Block(vertices=vertices,
                           name=self.txt_id + 'base block',
