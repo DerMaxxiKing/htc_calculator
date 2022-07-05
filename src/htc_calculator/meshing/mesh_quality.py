@@ -64,9 +64,9 @@ class MeshQuality(object):
 
         self._min_flatness = kwargs.get('_min_flatness', kwargs.get('min_flatness', None))
 
-        self._min_vol = kwargs.get('_min_vol', kwargs.get('min_vol', 1e-13))
+        self._min_vol = kwargs.get('_min_vol', kwargs.get('min_vol', 1e-10))
 
-        self._min_tet_quality = kwargs.get('_min_tet_quality', kwargs.get('min_tet_quality', 1e-15))
+        self._min_tet_quality = kwargs.get('_min_tet_quality', kwargs.get('min_tet_quality', 1e-10))
 
         self._min_area = kwargs.get('_min_area', kwargs.get('min_area', -1.0))
 
@@ -312,4 +312,3 @@ class MeshQuality(object):
 
 
 default_mesh_quality = MeshQuality()
-

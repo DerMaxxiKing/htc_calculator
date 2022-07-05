@@ -8,6 +8,7 @@ import re
 from io import StringIO
 import numpy as np
 import gmsh
+from copy import deepcopy
 # from pygmsh.helpers import extract_to_meshio
 
 from .logger import logger
@@ -36,7 +37,8 @@ class Face(object):
         # logger.debug(f'    finished initializing face {self.id} in {time.time() - start_time} s')
 
         self._surface_mesh_setup = kwargs.get('_surface_mesh_setup',
-                                              kwargs.get('surface_mesh_setup', default_surface_mesh_parameter))
+                                              kwargs.get('surface_mesh_setup',
+                                                         deepcopy(default_surface_mesh_parameter)))
 
         self.linear_deflection = kwargs.get('linear_deflection', 0.5)
         self.angular_deflection = kwargs.get('angular_deflection', 0.5)
@@ -81,7 +83,7 @@ class Face(object):
         nv = self.fc_face.normalAt(*uv)
         return nv.normalize()
 
-    def create_stl_str(self, of=False):
+    def create_stl_str(self, of=False, scale_to_m=True):
 
         logger.debug(f'creating stl string for face {self.id}...')
         # msh = MeshPart.meshFromShape(Shape=self.fc_face, MaxLength=1)
@@ -98,6 +100,17 @@ class Face(object):
             mesh_shp = MeshPart.meshFromShape(self.fc_face,
                                               LinearDeflection=self.linear_deflection,
                                               AngularDeflection=self.angular_deflection)
+            if scale_to_m:
+                print('done')
+                mat = FreeCAD.Matrix()
+                mat.A11 = 0.001     # make the objects two times bigger
+                mat.A22 = 0.001
+                mat.A33 = 0.001
+
+                mesh_shp.transform(mat)
+
+            # mesh_shp = MeshPart.meshFromShape(self.fc_face, MaxLength=1000)
+
             mesh_shp.write(tmp_file)
 
             with open(tmp_file, encoding="utf8") as file:

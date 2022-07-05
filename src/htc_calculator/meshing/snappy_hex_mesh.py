@@ -43,6 +43,7 @@ def to_of_dict_format(parameter):
 
 def run_shm(case_dir):
     logger.info(f'Generating mesh....')
+
     res = subprocess.run(["/bin/bash", "-i", "-c", "snappyHexMesh 2>&1 | tee snappyHexMesh.log"],
                          capture_output=True,
                          cwd=case_dir,
@@ -117,7 +118,7 @@ class SnappyHexMesh(object):
 
         self._castellated_mesh = kwargs.get('_castellated_mesh', kwargs.get('castellated_mesh', True))
         self._snap = kwargs.get('_snap', kwargs.get('snap', True))
-        self._add_layers = kwargs.get('_add_layers', kwargs.get('add_layers', True))
+        self._add_layers = kwargs.get('_add_layers', kwargs.get('add_layers', False))
         self._merge_tolerance = kwargs.get('_merge_tolerance', kwargs.get('merge_tolerance', float(1e-6)))
 
         location_in_mesh = kwargs.get('_location_in_mesh',
@@ -135,20 +136,20 @@ class SnappyHexMesh(object):
 
         self._locations_in_mesh = kwargs.get('_locations_in_mesh', kwargs.get('locations_in_mesh', None))
 
-        self._max_local_cells = kwargs.get('_max_local_cells', kwargs.get('max_local_cells', int(1e+7)))
+        self._max_local_cells = kwargs.get('_max_local_cells', kwargs.get('max_local_cells', int(2e+7)))
 
-        self._max_global_cells = kwargs.get('_max_global_cells', kwargs.get('max_global_cells', int(2e+7)))
+        self._max_global_cells = kwargs.get('_max_global_cells', kwargs.get('max_global_cells', int(3e+7)))
 
-        self._min_refinement_cells = kwargs.get('_min_refinement_cells', kwargs.get('min_refinement_cells', 2))
+        self._min_refinement_cells = kwargs.get('_min_refinement_cells', kwargs.get('min_refinement_cells', 100))
 
-        self._max_load_unbalance = kwargs.get('_max_load_unbalance', kwargs.get('max_load_unbalance', 0.1))
+        self._max_load_unbalance = kwargs.get('_max_load_unbalance', kwargs.get('max_load_unbalance', 0.2))
 
-        self._n_cells_between_levels = kwargs.get('_n_cells_between_levels', kwargs.get('n_cells_between_levels', 3))
+        self._n_cells_between_levels = kwargs.get('_n_cells_between_levels', kwargs.get('n_cells_between_levels', 1))
 
         self._resolve_feature_angle = kwargs.get('_resolve_feature_angle', kwargs.get('resolve_feature_angle', 30))
 
         self._allow_free_standing_zone_faces = kwargs.get('_allow_free_standing_zone_faces',
-                                                          kwargs.get('allow_free_standing_zone_faces', True))
+                                                          kwargs.get('allow_free_standing_zone_faces', False))
 
         self._features = kwargs.get('_features', kwargs.get('features', None))
 
@@ -156,20 +157,20 @@ class SnappyHexMesh(object):
 
         self._refinement_regions = kwargs.get('_refinement_regions', kwargs.get('refinement_regions', None))
 
-        self._n_smooth_patch = kwargs.get('_n_smooth_patch', kwargs.get('n_smooth_patch', 3))
+        self._n_smooth_patch = kwargs.get('_n_smooth_patch', kwargs.get('n_smooth_patch', 5))
 
-        self._tolerance = kwargs.get('_tolerance', kwargs.get('tolerance', 2.0))
+        self._tolerance = kwargs.get('_tolerance', kwargs.get('tolerance', 10.0))
 
-        self._n_solve_iter = kwargs.get('_n_solve_iter', kwargs.get('n_solve_iter', 50))
+        self._n_solve_iter = kwargs.get('_n_solve_iter', kwargs.get('n_solve_iter', 20))
 
-        self._n_relax_iter = kwargs.get('_n_relax_iter', kwargs.get('n_relax_iter', 5))
+        self._n_relax_iter = kwargs.get('_n_relax_iter', kwargs.get('n_relax_iter', 10))
 
-        self._n_feature_snap_iter = kwargs.get('_n_feature_snap_iter', kwargs.get('n_feature_snap_iter', 10))
+        self._n_feature_snap_iter = kwargs.get('_n_feature_snap_iter', kwargs.get('n_feature_snap_iter', 100))
 
         self._implicit_feature_snap = kwargs.get('_implicit_feature_snap',
-                                                 kwargs.get('implicit_feature_snap', True))
+                                                 kwargs.get('implicit_feature_snap', False))
 
-        self._explicit_feature_snap = kwargs.get('_explicit_feature_snap', kwargs.get('explicit_feature_snap', False))
+        self._explicit_feature_snap = kwargs.get('_explicit_feature_snap', kwargs.get('explicit_feature_snap', True))
 
         self._multi_region_feature_snap = kwargs.get('_multi_region_feature_snap',
                                                      kwargs.get('multi_region_feature_snap', False))
@@ -191,6 +192,8 @@ class SnappyHexMesh(object):
         self._num_procs = kwargs.get('_num_procs', kwargs.get('num_procs', None))
 
         self._num_subdomains = kwargs.get('_num_subdomains', kwargs.get('num_subdomains', np.array([1, 1, 1])))
+
+        self.strict_region_snap = False
 
     # -----------------------------------------
     # property setup for attributes
@@ -616,7 +619,15 @@ class SnappyHexMesh(object):
             if attr == 'features':
                 parameter = self.__getattribute__(attr)
                 if parameter is None:
-                    s += '\t{:30s}{:>20}'.format('features', '( )') + ';\n'
+                    # s += '\t{:30s}{:>20}'.format('features', '( )') + ';\n'
+
+                    s += (f'\tfeatures\n'
+                    f'\t(\n'
+                    f"\t    {'{'}\n"
+                    f'\t        file "{self.assembly.txt_id}.eMesh";\n'
+                    f'\t        level 0;\n'
+                    f"\t    {'}'}\n"
+                    f"\t);\n")
                     continue
             elif attr in ['refinement_surfaces', 'refinement_regions']:
                 parameter = self.__getattribute__(attr)
@@ -647,6 +658,7 @@ class SnappyHexMesh(object):
             'implicit_feature_snap': 'implicitFeatureSnap',
             'explicit_feature_snap': 'explicitFeatureSnap',
             'multi_region_feature_snap': 'multiRegionFeatureSnap',
+            'strict_region_snap': 'strictRegionSnap'
         }
 
         s = '{\n'
@@ -758,6 +770,58 @@ class SnappyHexMesh(object):
         lines.insert(lines.__len__() - 1, '\t'.join(('\n' + s.lstrip()).splitlines(True)))
 
         self.layer_setup = '\n'.join(lines)
+
+    def create_surface_feature_extract_dict(self, case_dir=None):
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        if case_dir is None:
+            logging.error(f'{self.name}: no case_dir')
+            return
+
+        template = pkg_resources.read_text(msh_resources, 'surfaceFeatureExtractDict')
+        s = template.replace('<stl_file>', self.assembly.txt_id + '.stl')
+
+        os.makedirs(case_dir, exist_ok=True)
+        os.makedirs(os.path.join(case_dir, '0'), exist_ok=True)
+        os.makedirs(os.path.join(case_dir, 'constant'), exist_ok=True)
+        os.makedirs(os.path.join(case_dir, 'system'), exist_ok=True)
+
+        dst = os.path.join(case_dir, 'system', 'surfaceFeatureExtractDict')
+        with open(dst, 'w') as sfed:
+            sfed.write(s)
+
+    def run_surface_feature_extract(self, case_dir=None):
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        if case_dir is None:
+            logging.error(f'{self.name}: no case_dir')
+            return
+
+        logger.info(f'Generating mesh....')
+
+        res = subprocess.run(["/bin/bash", "-i", "-c", "surfaceFeatureExtract 2>&1 | tee surfaceFeatureExtract.log"],
+                             capture_output=True,
+                             cwd=case_dir,
+                             user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            if output.find('FOAM FATAL ERROR') != -1:
+                logger.error(f'Error running surfaceFeatureExtract:\n\n{output}')
+
+            if output.find('FOAM FATAL IO ERROR') != -1:
+                logger.error(f'Error running surfaceFeatureExtract:\n\n{output}')
+                raise Exception(f'Error running surfaceFeatureExtract:\n\n{output}')
+
+            logger.info(f"Successfully created mesh:\n"
+                        f"Directory: {case_dir}\n\n ")
+
+        else:
+            logger.error(f"{res.stderr.decode('ascii')}")
+            raise Exception(f"Error running surfaceFeatureExtract:\n{res.stderr.decode('ascii')}")
+        return True
 
     def run(self, case_dir=None):
         if case_dir is None:

@@ -1,4 +1,4 @@
-FROM opencfd/openfoam-run:latest
+FROM opencfd/openfoam-run:2206
 
 WORKDIR /app
 

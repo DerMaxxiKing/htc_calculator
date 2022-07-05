@@ -20,9 +20,24 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-surfaces ("<stl_file>");
+<stl_file>
+{
+    // How to obtain raw features (extractFromFile || extractFromSurface)
+    extractionMethod    extractFromSurface;
+
+    // Mark edges whose adjacent surface normals are at an angle less
+    // than includedAngle as features
+    // - 0  : selects no edges
+    // - 180: selects all edges
+    includedAngle       180;
+
+    // Write options
+
+    // Write features to obj format for postprocessing
+    writeObj            yes;
+}
 
 // Identify a feature when angle between faces < includedAngle
-includedAngle   150;
+includedAngle   180;
 
 // ************************************************************************* //

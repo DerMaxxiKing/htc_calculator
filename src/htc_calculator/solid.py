@@ -52,6 +52,8 @@ class Solid(object):
         self._obb = kwargs.get('obb', None)
         self._location_in_mesh = kwargs.get('location_in_mesh', None)
 
+        self.enlarge_obb = kwargs.get('enlarge_obb', 10)     #
+
     @property
     def obb(self):
         if self._obb is None:
@@ -117,8 +119,10 @@ class Solid(object):
 
         if self._base_block_mesh is None:
             self._base_block_mesh = self.create_base_block_mesh(self.base_directory)
+        return self._base_block_mesh
 
-    def update_face(self, face, new_face):
+    @staticmethod
+    def update_face(face, new_face):
 
         face.fc_face = new_face.fc_face
         face.normal = None
@@ -259,7 +263,7 @@ class Solid(object):
         buf.write(f"{' ' * offset}{'{'}\n")
         buf.write(f"{' ' * (offset + 4)}type            triSurfaceMesh;\n")
         buf.write(f"{' ' * (offset + 4)}file            \"{str(self.txt_id)}.stl\";\n")
-        buf.write(f"{' ' * (offset + 4)}scale            0.001;\n")
+        buf.write(f"{' ' * (offset + 4)}scale            1;\n")
         buf.write(f"{' ' * (offset + 4)}regions\n")
         buf.write(f"{' ' * (offset + 4)}{'{'}\n")
 
@@ -323,8 +327,16 @@ class Solid(object):
         pts = np.stack([np.array([x.X, x.Y, x.Z]) for x in self.fc_solid.Shape.Vertexes], axis=0)
         hull = ConvexHull(pts)
         hullpts = [pts[i] for i in hull.vertices]
+
         obb = OBB.build_from_points(hullpts)
-        obbvec = [FreeCAD.Vector(p)for p in obb.points]
+
+        center = np.mean(np.array(obb.points), axis=0)
+        vecs = obb.points - center
+        unit_vecs = vecs / np.linalg.norm(vecs, axis=0)
+        scaled_points = np.array(obb.points) + unit_vecs * self.enlarge_obb
+
+        # obbvec = [FreeCAD.Vector(p)for p in obb.points]
+        obbvec = [FreeCAD.Vector(p) for p in scaled_points]
 
         faces = []
         idx = [[0, 1, 2, 3, 0],
@@ -366,31 +378,40 @@ class Solid(object):
     def is_inside(self, vec: Base.Vector):
         return self.fc_solid.Shape.isInside(vec, 0, True)
 
-    def create_shm_mesh(self, directory=None):
+    def create_shm_mesh(self, directory=None, create_block_mesh=True, normal=None, block_mesh_size=250):
 
         from .meshing.snappy_hex_mesh import SnappyHexMesh
+
+        if self.features['side_faces']:
+            for surf in self.features['side_faces']:
+                setattr(surf.surface_mesh_setup, 'max_refinement_level', 0)
+                setattr(surf.surface_mesh_setup, 'min_refinement_level', 0)
+
+        # for surf in self.faces:
+        #     setattr(surf.surface_mesh_setup, 'min_refinement_level', 2)
+        #     setattr(surf.surface_mesh_setup, 'max_refinement_level', 2)
 
         if directory is None:
             directory = self.base_directory
 
-        self.create_base_block_mesh(directory=directory)
+        if create_block_mesh:
+            self.create_base_block_mesh(directory=directory, normal=normal, cell_size=block_mesh_size)
 
         geo_dir = os.path.join(directory, 'constant', 'triSurface')
         os.makedirs(directory, exist_ok=True)
 
         self.write_of_geo(geo_dir, separate_interface=False)
 
-        shm = SnappyHexMesh(assembly=self)
+        shm = SnappyHexMesh(assembly=self,
+                            allow_free_standing_zone_faces=False)
+        shm.create_surface_feature_extract_dict(case_dir=directory)
+        shm.run_surface_feature_extract(case_dir=directory)
         shm.write_snappy_hex_mesh(case_dir=directory)
         shm.run(case_dir=directory)
 
         print('done')
 
-
-
-
-
-    def create_base_block_mesh(self, directory=None):
+    def create_base_block_mesh(self, directory=None, normal=None, cell_size=250, scale=0):
 
         if directory is None:
             directory = self.base_directory
@@ -400,7 +421,8 @@ class Solid(object):
         from .meshing.block_mesh import BlockMesh, Mesh, Block, BlockMeshVertex
         block_mesh = BlockMesh(case_dir=directory,
                                name='Block Mesh ' + self.txt_id,
-                               mesh=Mesh(name=self.txt_id))
+                               mesh=Mesh(name=self.txt_id,
+                                         default_cell_size=cell_size))
 
         block_mesh.mesh.activate()
 
@@ -423,10 +445,27 @@ class Solid(object):
                           grading=[1, 1, 1],
                           mesh=block_mesh.mesh)
 
+        num_cells = [new_block.edge0.length / cell_size,
+                     new_block.edge3.length / cell_size,
+                     new_block.edge8.length / cell_size
+                     ]
+
+        if normal is not None:
+            if np.allclose(new_block.edge0.direction, normal) or np.allclose(new_block.edge0.direction, -normal):
+                num_cells[0] = new_block.edge0.length / 20
+            if np.allclose(new_block.edge3.direction, normal) or np.allclose(new_block.edge3.direction, -normal):
+                num_cells[1] = new_block.edge3.length / 20
+            if np.allclose(new_block.edge8.direction, normal) or np.allclose(new_block.edge8.direction, -normal):
+                num_cells[2] = new_block.edge8.length / 20
+
+        new_block.num_cells = num_cells
+
         os.makedirs(directory, exist_ok=True)
         block_mesh.init_case()
-        block_mesh.run_block_mesh()
+        block_mesh.run_block_mesh(run_parafoam=True)
         logger.info(f'Successfully created block mesh for solid: {self.txt_id}')
+
+        return block_mesh
 
     def __repr__(self):
         rep = f'Solid {self.name} {self.id} {self.Volume}'

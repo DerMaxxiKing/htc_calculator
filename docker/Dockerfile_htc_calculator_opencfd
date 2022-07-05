@@ -1,4 +1,4 @@
-FROM maxxiking/opencfd_fc_19_3:latest
+FROM maxxiking/opencfd_fc_19_3:2206
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install -r /tmp/requirements.txt
