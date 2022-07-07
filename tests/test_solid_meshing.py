@@ -73,5 +73,15 @@ tabs1 = ActivatedReferenceFace(vertices=vertices,
                                default_arc_cell_size=10,
                                name='test1')
 
-solid_0 = tabs1.assembly.solids[0]
+solid_0 = tabs1.assembly.solids[1]
+
+for solid in tabs1.assembly.solids:
+    if 'pipe_faces' in solid.features.keys():
+        solid.features['pipe_faces'].surface_mesh_setup.max_refinement_level = 4
+        solid.features['pipe_faces'].surface_mesh_setup.max_refinement_level = 3
+        solid.create_shm_mesh(normal=tabs1.normal)
+
+    print('done')
+
+
 print('done')

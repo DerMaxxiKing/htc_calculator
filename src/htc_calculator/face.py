@@ -84,6 +84,12 @@ class Face(object):
         return nv.normalize()
 
     def create_stl_str(self, of=False, scale_to_m=True):
+        """
+
+        :param of: Export for openFoam
+        :param scale_to_m: scale stl export to m instead of mm
+        :return: stl string
+        """
 
         logger.debug(f'creating stl string for face {self.id}...')
         # msh = MeshPart.meshFromShape(Shape=self.fc_face, MaxLength=1)

@@ -8,6 +8,7 @@ import re
 import numpy as np
 import trimesh
 from scipy.spatial import ConvexHull
+from math import ceil
 
 from .meshing.surface_mesh_parameters import default_surface_mesh_parameter
 from .face import Face
@@ -445,9 +446,9 @@ class Solid(object):
                           grading=[1, 1, 1],
                           mesh=block_mesh.mesh)
 
-        num_cells = [new_block.edge0.length / cell_size,
-                     new_block.edge3.length / cell_size,
-                     new_block.edge8.length / cell_size
+        num_cells = [ceil(new_block.edge0.length / cell_size),
+                     ceil(new_block.edge3.length / cell_size),
+                     ceil(new_block.edge8.length / cell_size)
                      ]
 
         if normal is not None:
