@@ -765,9 +765,6 @@ class PipeSolid(Solid):
 
         inlet_outlet = hull.fc_solid.Shape.Shells[0].common(pipe_shape)
 
-
-
-
         if inlet_outlet.SubShapes.__len__() == 2:
             inlet = Face(fc_face=inlet_outlet.SubShapes[0].removeSplitter(),
                          name='Pipe_Inlet')

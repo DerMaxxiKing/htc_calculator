@@ -1,7 +1,10 @@
 import os
 import numpy as np
 from src.htc_calculator.reference_face import ReferenceFace
+from src.htc_calculator.activated_reference_face import ActivatedReferenceFace
 from src.htc_calculator.construction import Solid, Layer, ComponentConstruction
+from src.htc_calculator.buildin_materials import water, aluminium
+from src.htc_calculator.meshing.buildin_pipe_sections.tube_with_wall_optimized import pipe_section
 
 
 vertices = np.array([[0, 0, 0],
@@ -31,7 +34,7 @@ layer2 = Layer(name='layer2_rockwool', material=rockwool, thickness=100)
 layer3 = Layer(name='layer3_plaster',  material=plaster, thickness=20)
 
 test_construction = ComponentConstruction(name='test_construction',
-                                          layers=[layer1],
+                                          layers=[layer1, layer2],
                                           side_1_offset=0.00)
 
 ref_face = ReferenceFace(vertices=vertices,
@@ -47,4 +50,28 @@ os.mkdir(os.path.join(mesh_path, 'system'))
 # solid_0.create_base_block_mesh()
 solid_0.create_shm_mesh(normal=ref_face.normal)
 
+print('done')
+
+tube_material = Solid(name='Tube Material',
+                      density=1800,
+                      specific_heat_capacity=700,
+                      heat_conductivity=0.4,
+                      roughness=0.0004)
+
+tabs1 = ActivatedReferenceFace(vertices=vertices,
+                               component_construction=test_construction,
+                               start_edge=0,
+                               pipe_section=pipe_section,
+                               tube_diameter=20,
+                               tube_inner_diameter=16,
+                               tube_material=tube_material,
+                               tube_distance=225,
+                               tube_edge_distance=300,
+                               bending_radius=50,
+                               tube_side_1_offset=100,
+                               default_mesh_size=50,
+                               default_arc_cell_size=10,
+                               name='test1')
+
+solid_0 = tabs1.assembly.solids[0]
 print('done')
