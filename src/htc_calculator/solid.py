@@ -10,6 +10,7 @@ import trimesh
 from scipy.spatial import ConvexHull
 from math import ceil
 
+
 from .meshing.surface_mesh_parameters import default_surface_mesh_parameter
 from .face import Face
 from .tools import export_objects, add_radius_to_edges, vector_to_np_array, perpendicular_vector, extrude, create_pipe, create_pipe_wire, add_radius_to_edges
@@ -379,12 +380,22 @@ class Solid(object):
     def is_inside(self, vec: Base.Vector):
         return self.fc_solid.Shape.isInside(vec, 0, True)
 
-    def create_shm_mesh(self, directory=None, create_block_mesh=True, normal=None, block_mesh_size=250):
+    def create_shm_mesh(self,
+                        directory=None,
+                        create_block_mesh=True,
+                        normal=None,
+                        block_mesh_size=250,
+                        parallel=True,
+                        feature_edges_level=0,
+                        refine_normal_direction=True):
 
         from .meshing.snappy_hex_mesh import SnappyHexMesh
 
-        if self.features['side_faces']:
-            for surf in self.features['side_faces']:
+        if 'side_faces' in self.features.keys():
+            side_faces = self.features['side_faces']
+            if not isinstance(side_faces, list):
+                side_faces = [side_faces]
+            for surf in side_faces:
                 setattr(surf.surface_mesh_setup, 'max_refinement_level', 0)
                 setattr(surf.surface_mesh_setup, 'min_refinement_level', 0)
 
@@ -396,7 +407,10 @@ class Solid(object):
             directory = self.base_directory
 
         if create_block_mesh:
-            self.create_base_block_mesh(directory=directory, normal=normal, cell_size=block_mesh_size)
+            self.create_base_block_mesh(directory=directory,
+                                        normal=normal,
+                                        cell_size=block_mesh_size,
+                                        refine_normal_direction=refine_normal_direction)
 
         geo_dir = os.path.join(directory, 'constant', 'triSurface')
         os.makedirs(directory, exist_ok=True)
@@ -404,15 +418,20 @@ class Solid(object):
         self.write_of_geo(geo_dir, separate_interface=False)
 
         shm = SnappyHexMesh(assembly=self,
-                            allow_free_standing_zone_faces=False)
+                            allow_free_standing_zone_faces=False,
+                            feature_edges_level=feature_edges_level)
         shm.create_surface_feature_extract_dict(case_dir=directory)
         shm.run_surface_feature_extract(case_dir=directory)
         shm.write_snappy_hex_mesh(case_dir=directory)
-        shm.run(case_dir=directory)
+        shm.run(case_dir=directory, parallel=parallel)
 
         print('done')
 
-    def create_base_block_mesh(self, directory=None, normal=None, cell_size=250, scale=0):
+    def create_base_block_mesh(self, directory=None,
+                               normal=None,
+                               cell_size=250,
+                               scale=10,
+                               refine_normal_direction=True):
 
         if directory is None:
             directory = self.base_directory
@@ -437,6 +456,11 @@ class Solid(object):
             [self.obb.bounds[1, 0], self.obb.bounds[1, 1], self.obb.bounds[1, 2]],
             [self.obb.bounds[1, 0], self.obb.bounds[0, 1], self.obb.bounds[1, 2]]])
 
+        center = np.mean(block_vertices, axis=0)
+
+        # translate block vertices
+        block_vertices = block_vertices + (block_vertices - center) / np.linalg.norm(block_vertices - center, axis=1)[:, None] * scale
+
         vertices = [BlockMeshVertex(position=x) for x in block_vertices]
 
         new_block = Block(vertices=vertices,
@@ -451,13 +475,14 @@ class Solid(object):
                      ceil(new_block.edge8.length / cell_size)
                      ]
 
-        if normal is not None:
-            if np.allclose(new_block.edge0.direction, normal) or np.allclose(new_block.edge0.direction, -normal):
-                num_cells[0] = new_block.edge0.length / 20
-            if np.allclose(new_block.edge3.direction, normal) or np.allclose(new_block.edge3.direction, -normal):
-                num_cells[1] = new_block.edge3.length / 20
-            if np.allclose(new_block.edge8.direction, normal) or np.allclose(new_block.edge8.direction, -normal):
-                num_cells[2] = new_block.edge8.length / 20
+        if refine_normal_direction:
+            if normal is not None:
+                if np.allclose(new_block.edge0.direction, normal) or np.allclose(new_block.edge0.direction, -normal):
+                    num_cells[0] = ceil(new_block.edge0.length / 50)
+                if np.allclose(new_block.edge3.direction, normal) or np.allclose(new_block.edge3.direction, -normal):
+                    num_cells[1] = ceil(new_block.edge3.length / 50)
+                if np.allclose(new_block.edge8.direction, normal) or np.allclose(new_block.edge8.direction, -normal):
+                    num_cells[2] = ceil(new_block.edge8.length / 50)
 
         new_block.num_cells = num_cells
 
@@ -467,6 +492,15 @@ class Solid(object):
         logger.info(f'Successfully created block mesh for solid: {self.txt_id}')
 
         return block_mesh
+
+    def common(self, other):
+        """
+        Find common with other solid
+        :param other:
+        :return: common faces
+        """
+
+        return self.fc_solid.Shape.Shells[0].common(other.fc_solid.Shape.Shells[0])
 
     def __repr__(self):
         rep = f'Solid {self.name} {self.id} {self.Volume}'

@@ -703,6 +703,24 @@ class OFCase(object):
 
         print('done')
 
+    def run_with_separate_meshes_3(self):
+
+        cut_pipe_layer_solid = self.reference_face.cut_pipe_layer_solid
+        os.makedirs(f'{work_dir}/{cut_pipe_layer_solid.txt_id}', exist_ok=True)
+        cut_pipe_layer_solid.save_fcstd(f'{work_dir}/{cut_pipe_layer_solid.txt_id}/{cut_pipe_layer_solid.txt_id}.FCStd')
+
+        cut_pipe_layer_solid.features['pipe_mesh_interfaces'].surface_mesh_setup.max_refinement_level = 4
+        cut_pipe_layer_solid.features['pipe_mesh_interfaces'].surface_mesh_setup.min_refinement_level = 4
+
+        cut_pipe_layer_solid.create_shm_mesh(normal=self.reference_face.normal,
+                                             parallel=False,
+                                             block_mesh_size=100,
+                                             feature_edges_level=0,
+                                             refine_normal_direction=False)
+
+        print('done')
+
+
 
 def execute(command, cwd):
     p = Popen(command, stdin=PIPE, stdout=PIPE, stderr=STDOUT, cwd=cwd)

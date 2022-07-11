@@ -1,0 +1,38 @@
+version: "3.9"  # optional since v1.27.0
+services:
+  openFOAM:
+    image: maxxiking/of_ssh:latest
+    stdin_open: true # docker run -i
+    tty: true        # docker run -t
+    container_name: openFOAM
+    volumes:
+      - type: bind
+        source: E:\Ubuntu\docker_sim
+        target: /simulations
+    networks:
+      my-ntwk:
+        ipv4_address: 172.20.0.5
+    extra_hosts:
+      - "htc_calculator.info.my:172.20.0.6"
+    hostname: openfoam.info.my
+    ports:
+      - "22:22"
+  htc_calculator:
+    image: maxxiking/htc_calculator_opencfd:latest
+    stdin_open: true # docker run -i
+    tty: true        # docker run -t
+    container_name: htc_calculator
+    hostname: htc_calculator.info.my
+    volumes:
+      - type: bind
+        source: E:\Ubuntu\docker_sim
+        target: /simulations
+    networks:
+      my-ntwk:
+        ipv4_address: 172.20.0.6
+
+networks:
+  my-ntwk:
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24

@@ -1,5 +1,6 @@
 import copy
 import posix
+import re
 import subprocess
 import functools
 import operator
@@ -3766,6 +3767,22 @@ class CompBlock(object, metaclass=CompBlockMetaMock):
         self.blocks = kwargs.get('blocks', [])
 
     @property
+    def id(self):
+        return self._id
+
+    @property
+    def txt_id(self):
+        return re.sub('\W+', '', 'a' + str(self.id))
+
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, name):
+        self._name = name
+
+    @property
     def cell_zones(self):
         if self._cell_zones is None:
             self._cell_zones = {x.cell_zone for x in self.blocks}
@@ -3814,6 +3831,23 @@ class CompBlock(object, metaclass=CompBlockMetaMock):
         solid = FCPart.Solid(shell)
 
         return solid
+
+    def save_fcstd(self, filename, shape_type='solid'):
+        """
+        save as freecad document
+        :param filename: full filename; example: '/tmp/test.FCStd'
+        :param shape_type: 'solid', 'faces'
+        """
+        doc = App.newDocument(f"Solid {self.name}")
+        if shape_type == 'solid':
+            __o__ = doc.addObject("Part::Feature", f'Solid {self.name} {self.id}')
+            __o__.Shape = self.fc_solid.Shape
+        elif shape_type == 'face':
+            for face in self.faces:
+                __o__ = doc.addObject("Part::Face", f'Face {face.name} {face.id}')
+                __o__.Shape = face.fc_solid.Shape
+        doc.recompute()
+        doc.saveCopy(filename)
 
     def __getstate__(self):
         d = dict(self.__dict__)

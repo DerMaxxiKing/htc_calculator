@@ -110,7 +110,8 @@ case = OFCase(reference_face=tabs1,
 
 tabs1.case = case
 
-case.run_with_separate_meshes2()
+# case.run_with_separate_meshes2()
+case.run_with_separate_meshes_3()
 
 #
 # tabs1.generate_reference_geometry()

@@ -94,9 +94,4 @@ class SurfaceMeshParameters(object):
 
 default_surface_mesh_parameter = SurfaceMeshParameters(name='default_surface_mesh_setup',
                                                        min_refinement_level=0,
-                                                       max_refinement_level=0)
-
-
-
-
-
+                                                       max_refinement_level=4)

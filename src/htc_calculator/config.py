@@ -1,4 +1,5 @@
 import sys
+import os
 
 # print('Importing FreeCAD and Modules')
 # sys.path.append('/usr/lib/freecad/lib')
@@ -17,5 +18,6 @@ import sys
 # sys.path.append('mp/squashfs-root/usr/lib')
 
 
-work_dir = '/tmp'
+work_dir = '/simulations'
+os.mkdir(work_dir)
 n_proc = 8

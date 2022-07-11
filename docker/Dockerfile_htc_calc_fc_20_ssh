@@ -1,0 +1,61 @@
+FROM ubuntu:20.04
+
+CMD ["/bin/bash"]
+
+WORKDIR /tmp
+
+# start with more uptodate packages
+RUN apt-get update \
+    && apt-get -y --no-install-recommends install software-properties-common wget curl \
+    && add-apt-repository ppa:deadsnakes/ppa -y \
+    && apt update \
+    && apt-get -y --no-install-recommends install python3.9 python3.9-distutils\
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1 \
+    && curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py  \
+    && python3.9 get-pip.py \
+    && rm -rf /var/lib/apt/lists/*
+
+# freecad
+RUN wget https://github.com/FreeCAD/FreeCAD/releases/download/0.20/FreeCAD-0.20.0-Linux-x86_64.AppImage \
+   && chmod +x FreeCAD-0.20.0-Linux-x86_64.AppImage \
+   && ./FreeCAD-0.20.0-Linux-x86_64.AppImage --appimage-extract \
+   && rm FreeCAD-0.20.0-Linux-x86_64.AppImage
+
+RUN apt-get update
+RUN apt-get -y --no-install-recommends install libgl1-mesa-glx libxcursor1 libxft2 libxinerama1 libglu1-mesa libgomp1
+RUN pip3 install gmsh
+
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/app/squashfs-root/usr/lib/
+ENV FreeCADPath="/app/squashfs-root/usr/lib/"
+
+COPY tests/test_imports.py /tmp/test_imports.py
+COPY python_startup.py .
+
+ENV PYTHONPATH="${PYTHONPATH}:/tmp/squashfs-root/usr/lib/python3.9/site-packages/:/tmp/squashfs-root/usr/lib/"
+
+RUN apt-get update && \
+    apt-get install -y openssh-server vim
+
+EXPOSE 22
+
+RUN useradd -rm -d /home/nf2/ -s /bin/bash -g root -G sudo -u 1001 ubuntu
+USER ubuntu
+WORKDIR /home/ubuntu
+
+RUN mkdir -p /home/nf2/.ssh/ && \
+    chmod 0700 /home/nf2/.ssh  && \
+    touch /home/nf2/.ssh/authorized_keys && \
+    chmod 600 /home/nf2/.ssh/authorized_keys && \
+    touch /home/nf2/.ssh/config && \
+    chmod 600 /home/nf2/.ssh/config
+
+COPY /docker/ssh-keys/ /keys/
+RUN cat /keys/ssh_test.pub >> /home/nf2/.ssh/authorized_keys
+RUN cat /keys/config >> /home/nf2/.ssh/config
+
+USER root
+
+# ENV FREECAD_STARTUP_FILE ./python_startup.py
+# ENV PYTHONSTARTUP ${FREECAD_STARTUP_FILE}
+
+# RUN python3 test_imports.py

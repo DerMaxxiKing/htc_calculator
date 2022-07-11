@@ -20,9 +20,11 @@ from .tools import export_objects, split_wire_by_projected_vertices
 from .case.case import OFCase
 from tqdm import tqdm, trange
 
+
 import FreeCAD
 import Part as FCPart
 from FreeCAD import Base
+import BOPTools.SplitAPI
 
 
 App = FreeCAD
@@ -47,6 +49,7 @@ class ActivatedReferenceFace(ReferenceFace):
         self._comp_blocks = None
         self._case = None
         self._layer_interface_planes = None
+        self._cut_pipe_layer_solid = None
 
         self.pipe_mesh = PipeMesh(name='Block Mesh ' + 'pipe_layer_mesh',
                                   mesh=Mesh(name='pipe_layer_mesh'))
@@ -137,6 +140,12 @@ class ActivatedReferenceFace(ReferenceFace):
             self._pipe_layer_index, self._pipe_layer = self.get_pipe_layer()
             self.pipe_layer.meshes.add(self.pipe_mesh)
         return self._pipe_layer
+
+    @property
+    def cut_pipe_layer_solid(self):
+        if self._cut_pipe_layer_solid is None:
+            self._cut_pipe_layer_solid = self.create_cut_pipe_layer_solid()
+        return self._cut_pipe_layer_solid
 
     def get_pipe_layer(self):
         layer_thicknesses = np.array([0, *[x.thickness for x in self.component_construction.layers]])
@@ -635,6 +644,41 @@ class ActivatedReferenceFace(ReferenceFace):
         logger.info('Cell zones updated successfully')
         last_activated_mesh.activate()
         return cell_zones
+
+    def create_cut_pipe_layer_solid(self):
+        pipe_layer_solid = self.pipe_layer.solid
+        pipe_mesh_solid = Solid(name='pipe_mesh_solid',
+                                faces=[Face(fc_face=x) for x in self.pipe_comp_blocks.fc_solid.Faces])
+
+        cutted_fc_solid = pipe_layer_solid.fc_solid.Shape.cut(pipe_mesh_solid.fc_solid.Shape)
+
+        common = cutted_fc_solid.Shells[0].common(pipe_mesh_solid.fc_solid.Shape.Shells[0])
+
+        base_faces = []
+        _ = [base_faces.extend(x.fc_face.Faces) for x in pipe_layer_solid.features['base_faces']]
+        base_faces_shell = FCPart.makeShell(base_faces)
+
+        top_faces = []
+        _ = [top_faces.extend(x.fc_face.Faces) for x in pipe_layer_solid.features['top_faces']]
+        top_faces_shell = FCPart.makeShell(top_faces)
+
+        side_faces = []
+        _ = [side_faces.extend(x.fc_face.Faces) for x in pipe_layer_solid.features['side_faces']]
+        side_faces_shell = FCPart.makeShell(side_faces)
+
+        base_face = Face(name='base_face', fc_face=cutted_fc_solid.Shells[0].common(base_faces_shell))
+        top_face = Face(name='top_face', fc_face=cutted_fc_solid.Shells[0].common(top_faces_shell))
+        side_face = Face(name='side_face', fc_face=cutted_fc_solid.Shells[0].common(side_faces_shell))
+        common_face = Face(name='pipe_mesh_interface', fc_face=common)
+
+        cutted_solid = Solid(name='cut_pipe_layer_solid',
+                             faces=[base_face, top_face, side_face, common_face])
+        cutted_solid.features['base_faces'] = base_face
+        cutted_solid.features['top_faces'] = top_face
+        cutted_solid.features['side_faces'] = side_face
+        cutted_solid.features['pipe_mesh_interfaces'] = common_face
+
+        return cutted_solid
 
     def combine_meshes(self):
         logger.info('Creating combined mesh...')

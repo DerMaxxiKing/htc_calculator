@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from src.htc_calculator.config import work_dir
 from src.htc_calculator.reference_face import ReferenceFace
 from src.htc_calculator.activated_reference_face import ActivatedReferenceFace
 from src.htc_calculator.construction import Solid, Layer, ComponentConstruction
@@ -42,13 +43,13 @@ ref_face = ReferenceFace(vertices=vertices,
 
 solid_0 = ref_face.assembly.solids[0]
 
-mesh_path = '/tmp/solid_0'
+mesh_path = f'{work_dir}/solid_0'
 os.mkdir(mesh_path)
 os.mkdir(os.path.join(mesh_path, 'constant'))
 os.mkdir(os.path.join(mesh_path, 'system'))
 
 # solid_0.create_base_block_mesh()
-solid_0.create_shm_mesh(normal=ref_face.normal)
+# solid_0.create_shm_mesh(normal=ref_face.normal)
 
 print('done')
 
@@ -77,9 +78,15 @@ solid_0 = tabs1.assembly.solids[1]
 
 for solid in tabs1.assembly.solids:
     if 'pipe_faces' in solid.features.keys():
+        solid.surface_mesh_setup.max_refinement_level = 4
+        solid.surface_mesh_setup.min_refinement_level = 1
+        for face in solid.faces:
+            face.surface_mesh_setup.max_refinement_level = 4
         solid.features['pipe_faces'].surface_mesh_setup.max_refinement_level = 4
-        solid.features['pipe_faces'].surface_mesh_setup.max_refinement_level = 3
-        solid.create_shm_mesh(normal=tabs1.normal)
+        solid.features['pipe_faces'].surface_mesh_setup.min_refinement_level = 4
+    os.mkdir(f'{work_dir}/{solid.txt_id}')
+    solid.save_fcstd(f'{work_dir}/{solid.txt_id}/{solid.txt_id}.FCStd')
+    solid.create_shm_mesh(normal=tabs1.normal, parallel=False, block_mesh_size=200)
 
     print('done')
 

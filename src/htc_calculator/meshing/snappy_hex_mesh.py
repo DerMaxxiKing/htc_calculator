@@ -6,7 +6,9 @@ from datetime import datetime
 import re
 from copy import deepcopy
 import subprocess
-
+from shutil import copyfile
+from multiprocessing import cpu_count
+from math import floor
 
 try:
     import importlib.resources as pkg_resources
@@ -41,29 +43,59 @@ def to_of_dict_format(parameter):
         return ''
 
 
-def run_shm(case_dir):
+def run_shm(case_dir, parallel=False):
     logger.info(f'Generating mesh....')
 
-    res = subprocess.run(["/bin/bash", "-i", "-c", "snappyHexMesh 2>&1 | tee snappyHexMesh.log"],
-                         capture_output=True,
-                         cwd=case_dir,
-                         user='root')
-    if res.returncode == 0:
-        output = res.stdout.decode('ascii')
-        if output.find('FOAM FATAL ERROR') != -1:
-            logger.error(f'Error running snappyHexMesh:\n\n{output}')
+    if parallel:
+        # copy allrun script
+        path = 'runSHM'
+        with pkg_resources.path(msh_resources, path) as path:
+            source = path.__str__()
+        dst = os.path.join(case_dir, 'runSHM')
+        copyfile(source, dst)
+        # make executable:
+        command = f"chmod +x {os.path.join(case_dir, 'runSHM')}"
+        ret = subprocess.run(command, capture_output=True, shell=True, executable='/bin/bash', cwd=case_dir)
 
-        if output.find('FOAM FATAL IO ERROR') != -1:
-            logger.error(f'Error running snappyHexMesh:\n\n{output}')
-            raise Exception(f'Error running snappyHexMesh:\n\n{output}')
 
-        logger.info(f"Successfully created mesh:\n"
-                    f"Directory: {case_dir}\n\n "
-                    f"{output[output.find('Mesh Information'):]}")
+        res = subprocess.run(["/bin/bash", "-i", "-c", "decomposePar 2>&1 | tee decomposePar.log"],
+                             capture_output=True,
+                             cwd=case_dir,
+                             user='root')
+        if res.returncode != 0:
+            logger.error(f"{res.stderr.decode('ascii')}")
+            raise Exception(f"Error running snappyHexMesh:\n{res.stderr.decode('ascii')}")
+
+        res = subprocess.run(["/bin/bash", "-i", "-c", "snappyHexMesh -parallel 2>&1 | tee snappyHexMesh.log"],
+                             capture_output=True,
+                             cwd=case_dir,
+                             user='root')
+        if res.returncode != 0:
+            logger.error(f"{res.stderr.decode('ascii')}")
+            raise Exception(f"Error running snappyHexMesh:\n{res.stderr.decode('ascii')}")
+
 
     else:
-        logger.error(f"{res.stderr.decode('ascii')}")
-        raise Exception(f"Error running snappyHexMesh:\n{res.stderr.decode('ascii')}")
+        res = subprocess.run(["/bin/bash", "-i", "-c", "snappyHexMesh 2>&1 | tee snappyHexMesh.log"],
+                             capture_output=True,
+                             cwd=case_dir,
+                             user='root')
+        if res.returncode == 0:
+            output = res.stdout.decode('ascii')
+            if output.find('FOAM FATAL ERROR') != -1:
+                logger.error(f'Error running snappyHexMesh:\n\n{output}')
+
+            if output.find('FOAM FATAL IO ERROR') != -1:
+                logger.error(f'Error running snappyHexMesh:\n\n{output}')
+                raise Exception(f'Error running snappyHexMesh:\n\n{output}')
+
+            logger.info(f"Successfully created mesh:\n"
+                        f"Directory: {case_dir}\n\n "
+                        f"{output[output.find('Mesh Information'):]}")
+
+        else:
+            logger.error(f"{res.stderr.decode('ascii')}")
+            raise Exception(f"Error running snappyHexMesh:\n{res.stderr.decode('ascii')}")
     return True
 
 
@@ -144,7 +176,7 @@ class SnappyHexMesh(object):
 
         self._max_load_unbalance = kwargs.get('_max_load_unbalance', kwargs.get('max_load_unbalance', 0.2))
 
-        self._n_cells_between_levels = kwargs.get('_n_cells_between_levels', kwargs.get('n_cells_between_levels', 1))
+        self._n_cells_between_levels = kwargs.get('_n_cells_between_levels', kwargs.get('n_cells_between_levels', 2))
 
         self._resolve_feature_angle = kwargs.get('_resolve_feature_angle', kwargs.get('resolve_feature_angle', 30))
 
@@ -165,7 +197,7 @@ class SnappyHexMesh(object):
 
         self._n_relax_iter = kwargs.get('_n_relax_iter', kwargs.get('n_relax_iter', 10))
 
-        self._n_feature_snap_iter = kwargs.get('_n_feature_snap_iter', kwargs.get('n_feature_snap_iter', 100))
+        self._n_feature_snap_iter = kwargs.get('_n_feature_snap_iter', kwargs.get('n_feature_snap_iter', 30))
 
         self._implicit_feature_snap = kwargs.get('_implicit_feature_snap',
                                                  kwargs.get('implicit_feature_snap', False))
@@ -192,6 +224,8 @@ class SnappyHexMesh(object):
         self._num_procs = kwargs.get('_num_procs', kwargs.get('num_procs', None))
 
         self._num_subdomains = kwargs.get('_num_subdomains', kwargs.get('num_subdomains', np.array([1, 1, 1])))
+
+        self.feature_edges_level = kwargs.get('feature_edges_level', 0)
 
         self.strict_region_snap = False
 
@@ -625,7 +659,7 @@ class SnappyHexMesh(object):
                     f'\t(\n'
                     f"\t    {'{'}\n"
                     f'\t        file "{self.assembly.txt_id}.eMesh";\n'
-                    f'\t        level 0;\n'
+                    f'\t        level {self.feature_edges_level};\n'
                     f"\t    {'}'}\n"
                     f"\t);\n")
                     continue
@@ -823,7 +857,7 @@ class SnappyHexMesh(object):
             raise Exception(f"Error running surfaceFeatureExtract:\n{res.stderr.decode('ascii')}")
         return True
 
-    def run(self, case_dir=None):
+    def run(self, case_dir=None, parallel=False):
         if case_dir is None:
             case_dir = self.case_dir
 
@@ -831,4 +865,13 @@ class SnappyHexMesh(object):
             logging.error(f'{self.name}: no case_dir')
             return
 
-        run_shm(case_dir)
+        if parallel:
+            # num_proc = floor(cpu_count()/2)
+            num_proc = 6
+            template = pkg_resources.read_text(msh_resources, 'decompose_par_dict')
+            s = template.replace('<n_procs>', str(num_proc))
+
+            with open(os.path.join(case_dir, 'system', 'decomposeParDict'), 'w') as sfed:
+                sfed.write(s)
+
+        run_shm(case_dir, parallel=parallel)
