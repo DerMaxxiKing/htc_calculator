@@ -5,21 +5,20 @@ RUN apt-get update && \
 
 EXPOSE 22
 
+# SSH
+RUN apt-get -y install openssh-server
+RUN mkdir -p /var/run/sshd
 
-RUN useradd -rm -d /home/nf2/ -s /bin/bash -g root -G sudo -u 1001 ubuntu
-USER ubuntu
-WORKDIR /home/ubuntu
+# authorize SSH connection with root account
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd && \
+    echo 'export NOTVISIBLE="in users profile"' >> ~/.bashrc && \
+    echo "export VISIBLE=now" >> /etc/profile
 
-RUN mkdir -p /home/nf2/.ssh/ && \
-    chmod 0700 /home/nf2/.ssh  && \
-    touch /home/nf2/.ssh/authorized_keys && \
-    chmod 600 /home/nf2/.ssh/authorized_keys && \
-    touch /home/nf2/.ssh/config && \
-    chmod 600 /home/nf2/.ssh/config
+RUN sudo service ssh restart
 
-COPY ssh-keys/ /keys/
-RUN cat /keys/ssh_test.pub >> /home/nf2/.ssh/authorized_keys
-RUN cat /keys/config >> /home/nf2/.ssh/config
+# change password root
+RUN echo "root:docker"|chpasswd
 
-USER root
-ENTRYPOINT service ssh start && bash
+# @see https://docs.docker.com/engine/examples/running_ssh_service/
+CMD ["/usr/sbin/sshd", "-D"]

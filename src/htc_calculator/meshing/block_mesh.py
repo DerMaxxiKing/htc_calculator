@@ -10,6 +10,9 @@ import itertools
 import numpy as np
 from re import findall, MULTILINE
 from functools import lru_cache, wraps
+from ..config import use_ssh
+if use_ssh:
+    from ..ssh import shell_handler
 from ..logger import logger
 from ..tools import vector_to_np_array, perpendicular_vector, export_objects, angle_between_vectors, array_row_intersection
 from ..geo_tools import search_contacts, surfaces_in_contact, get_position
@@ -4183,17 +4186,22 @@ class BlockMesh(object):
         self.write_block_mesh_dict()
 
     def create_block_obj(self):
-        logger.info(f'Exporting blockTopology....')
-        res = subprocess.run(["/bin/bash", "-i", "-c", "blockMesh -blockTopology -noFunctionObjects -noClean"],
-                             capture_output=True,
-                             cwd=self.case_dir,
-                             user='root')
-        if res.returncode == 0:
-            output = res.stdout.decode('ascii')
-            logger.info(f"Successfully exported blockTopology: \n\n {output}")
+
+        if use_ssh:
+            shin, shout, sherr = shell_handler.run_block_mesh(self.case_dir, 
+                                                              '-blockTopology -noFunctionObjects -noClean')
         else:
-            logger.error(f"{res.stderr.decode('ascii')}")
-            raise Exception(f"Error exporting blockTopology:\n{res.stderr.decode('ascii')}")
+            logger.info(f'Exporting blockTopology....')
+            res = subprocess.run(["/bin/bash", "-i", "-c", "blockMesh -blockTopology -noFunctionObjects -noClean"],
+                                 capture_output=True,
+                                 cwd=self.case_dir,
+                                 user='root')
+            if res.returncode == 0:
+                output = res.stdout.decode('ascii')
+                logger.info(f"Successfully exported blockTopology: \n\n {output}")
+            else:
+                logger.error(f"{res.stderr.decode('ascii')}")
+                raise Exception(f"Error exporting blockTopology:\n{res.stderr.decode('ascii')}")
 
     def obj_to_vtk(self):
         logger.info(f'Creating blockTopology vtk....')
@@ -4349,38 +4357,45 @@ class BlockMesh(object):
             self.obj_to_vtk()
 
         logger.info(f'Generating mesh....')
-        res = subprocess.run(["/bin/bash", "-i", "-c", "blockMesh -noFunctionObjects 2>&1 | tee blockMesh.log"],
-                             capture_output=True,
-                             cwd=case_dir,
-                             user='root')
-        if res.returncode == 0:
-            output = res.stdout.decode('ascii')
-            if output.find('FOAM FATAL ERROR') != -1:
-                logger.error(f'Error Creating block mesh:\n\n{output}')
 
-                if retry:
-                    if output.find('Inconsistent number of faces') != -1:
-                        items = findall("Inconsistent number of faces.*$", output, MULTILINE)
-                        inconsistent_blocks = [int(x) for x in findall(r'\d+', items[0])]
-                        self.fix_inconsistent_block_faces(inconsistent_blocks)
-                        self.run_block_mesh(case_dir=case_dir, retry=False)
-                else:
+        if use_ssh:
+            shin, shout, sherr = shell_handler.run_block_mesh(self.case_dir, '-noFunctionObjects -noClean')
+        else:
+            res = subprocess.run(["/bin/bash", "-i", "-c", "blockMesh -noFunctionObjects 2>&1 | tee blockMesh.log"],
+                                 capture_output=True,
+                                 cwd=case_dir,
+                                 user='root')
+            if res.returncode == 0:
+                output = res.stdout.decode('ascii')
+                if output.find('FOAM FATAL ERROR') != -1:
+                    logger.error(f'Error Creating block mesh:\n\n{output}')
+                    if retry:
+                        if output.find('Inconsistent number of faces') != -1:
+                            items = findall("Inconsistent number of faces.*$", output, MULTILINE)
+                            inconsistent_blocks = [int(x) for x in findall(r'\d+', items[0])]
+                            self.fix_inconsistent_block_faces(inconsistent_blocks)
+                            self.run_block_mesh(case_dir=case_dir, retry=False)
+                    else:
+                        raise Exception(f'Error Creating block mesh:\n\n{output}')
+
+                elif output.find('command not found') != -1:
+                    logger.error(f'Error Creating block mesh:\n\n{output}')
                     raise Exception(f'Error Creating block mesh:\n\n{output}')
 
-            if output.find('FOAM FATAL IO ERROR') != -1:
-                logger.error(f'Error Creating block mesh:\n\n{output}')
-                raise Exception(f'Error Creating block mesh:\n\n{output}')
+                if output.find('FOAM FATAL IO ERROR') != -1:
+                    logger.error(f'Error Creating block mesh:\n\n{output}')
+                    raise Exception(f'Error Creating block mesh:\n\n{output}')
 
-            logger.info(f"Successfully created block mesh:\n"
-                        f"Directory: {case_dir}\n\n "
-                        f"{output[output.find('Mesh Information'):]}")
+                logger.info(f"Successfully created block mesh:\n"
+                            f"Directory: {case_dir}\n\n "
+                            f"{output[output.find('Mesh Information'):]}")
 
-            if run_parafoam:
-                self.run_parafoam(case_dir=case_dir)
+                if run_parafoam:
+                    self.run_parafoam(case_dir=case_dir)
 
-        else:
-            logger.error(f"{res.stderr.decode('ascii')}")
-            raise Exception(f"Error creating block Mesh:\n{res.stderr.decode('ascii')}")
+            else:
+                logger.error(f"{res.stderr.decode('ascii')}")
+                raise Exception(f"Error creating block Mesh:\n{res.stderr.decode('ascii')}")
         return True
 
     def __repr__(self):

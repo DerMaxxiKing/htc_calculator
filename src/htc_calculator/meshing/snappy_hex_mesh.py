@@ -7,6 +7,8 @@ import re
 from copy import deepcopy
 import subprocess
 from shutil import copyfile
+from ..config import use_ssh
+from ..ssh import shell_handler
 from multiprocessing import cpu_count
 from math import floor
 
@@ -836,26 +838,29 @@ class SnappyHexMesh(object):
 
         logger.info(f'Generating mesh....')
 
-        res = subprocess.run(["/bin/bash", "-i", "-c", "surfaceFeatureExtract 2>&1 | tee surfaceFeatureExtract.log"],
-                             capture_output=True,
-                             cwd=case_dir,
-                             user='root')
-        if res.returncode == 0:
-            output = res.stdout.decode('ascii')
-            if output.find('FOAM FATAL ERROR') != -1:
-                logger.error(f'Error running surfaceFeatureExtract:\n\n{output}')
-
-            if output.find('FOAM FATAL IO ERROR') != -1:
-                logger.error(f'Error running surfaceFeatureExtract:\n\n{output}')
-                raise Exception(f'Error running surfaceFeatureExtract:\n\n{output}')
-
-            logger.info(f"Successfully created mesh:\n"
-                        f"Directory: {case_dir}\n\n ")
-
+        if use_ssh:
+            shell_handler.run_surface_feature_extract(case_dir)
         else:
-            logger.error(f"{res.stderr.decode('ascii')}")
-            raise Exception(f"Error running surfaceFeatureExtract:\n{res.stderr.decode('ascii')}")
-        return True
+            res = subprocess.run(["/bin/bash", "-i", "-c", "surfaceFeatureExtract 2>&1 | tee surfaceFeatureExtract.log"],
+                                 capture_output=True,
+                                 cwd=case_dir,
+                                 user='root')
+            if res.returncode == 0:
+                output = res.stdout.decode('ascii')
+                if output.find('FOAM FATAL ERROR') != -1:
+                    logger.error(f'Error running surfaceFeatureExtract:\n\n{output}')
+
+                if output.find('FOAM FATAL IO ERROR') != -1:
+                    logger.error(f'Error running surfaceFeatureExtract:\n\n{output}')
+                    raise Exception(f'Error running surfaceFeatureExtract:\n\n{output}')
+
+                logger.info(f"Successfully created mesh:\n"
+                            f"Directory: {case_dir}\n\n ")
+
+            else:
+                logger.error(f"{res.stderr.decode('ascii')}")
+                raise Exception(f"Error running surfaceFeatureExtract:\n{res.stderr.decode('ascii')}")
+            return True
 
     def run(self, case_dir=None, parallel=False):
         if case_dir is None:
@@ -865,13 +870,15 @@ class SnappyHexMesh(object):
             logging.error(f'{self.name}: no case_dir')
             return
 
-        if parallel:
-            # num_proc = floor(cpu_count()/2)
-            num_proc = 6
-            template = pkg_resources.read_text(msh_resources, 'decompose_par_dict')
-            s = template.replace('<n_procs>', str(num_proc))
+        if use_ssh:
+            shell_handler.run_shm(case_dir, parallel=True)
+        else:
+            if parallel:
+                # num_proc = floor(cpu_count()/2)
+                num_proc = 6
+                template = pkg_resources.read_text(msh_resources, 'decompose_par_dict')
+                s = template.replace('<n_procs>', str(num_proc))
 
-            with open(os.path.join(case_dir, 'system', 'decomposeParDict'), 'w') as sfed:
-                sfed.write(s)
-
-        run_shm(case_dir, parallel=parallel)
+                with open(os.path.join(case_dir, 'system', 'decomposeParDict'), 'w') as sfed:
+                    sfed.write(s)
+            run_shm(case_dir, parallel=parallel)

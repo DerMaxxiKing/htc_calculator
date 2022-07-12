@@ -17,3 +17,5 @@ pandas
 scipy
 mongoengine
 pyobb
+paramiko
+pyopenssl

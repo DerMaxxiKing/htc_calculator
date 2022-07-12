@@ -1,0 +1,17 @@
+FROM maxxiking/fc_20_gmsh:latest
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip3 install -r /tmp/requirements.txt
+
+RUN apt-get update && \
+    apt-get install -y openssh-server vim && \
+    pip3 install --upgrade --force-reinstall paramiko
+
+EXPOSE 22
+
+USER root
+
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/app/squashfs-root/usr/lib/
+ENV FreeCADPath="/app/squashfs-root/usr/lib/"
+
+ENV PYTHONPATH="${PYTHONPATH}:/tmp/squashfs-root/usr/lib/python3.9/site-packages/:/tmp/squashfs-root/usr/lib/"

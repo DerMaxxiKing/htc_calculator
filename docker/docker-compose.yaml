@@ -1,7 +1,7 @@
 version: "3.9"  # optional since v1.27.0
 services:
   openFOAM:
-    image: maxxiking/of_ssh:latest
+    image: maxxiking/of_service:latest
     stdin_open: true # docker run -i
     tty: true        # docker run -t
     container_name: openFOAM
@@ -12,13 +12,15 @@ services:
     networks:
       my-ntwk:
         ipv4_address: 172.20.0.5
-    extra_hosts:
-      - "htc_calculator.info.my:172.20.0.6"
     hostname: openfoam.info.my
     ports:
       - "22:22"
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: '0.95'
   htc_calculator:
-    image: maxxiking/htc_calculator_opencfd:latest
+    image: maxxiking/fc_19_3_ssh:latest
     stdin_open: true # docker run -i
     tty: true        # docker run -t
     container_name: htc_calculator
