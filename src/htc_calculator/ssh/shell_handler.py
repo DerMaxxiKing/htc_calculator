@@ -127,7 +127,7 @@ class ShellHandler:
                 raise Exception(f"Error running surfaceFeatureExtract:  \n {''.join(sherr)}")
             logger.info(f"Successfully created surfaceFeatureExtract:\n"
                         f"Directory: {workdir}\n\n "
-                        f"{output}")
+                        f"{output[output.find('Initial Feature set'):output.find('Writing extendedFeatureEdgeMesh')]}")
 
         return True
 
@@ -154,8 +154,6 @@ class ShellHandler:
             shin, shout, sherr = self.execute(f'./runSHM', cwd=workdir)
 
             shin, shout, sherr = self.execute(f'paraFoam -touchAll', cwd=workdir)
-
-            print('done')
 
         else:
             shin, shout, sherr = self.execute(cmd, cwd=workdir)
@@ -191,6 +189,8 @@ class ShellHandler:
             logger.info(f"Successfully created block mesh:\n"
                         f"Directory: {workdir}\n\n "
                         f"{output[output.find('Mesh Information'):output.find('End')]}")
+
+        self.execute(f'paraFoam -touchAll', cwd=workdir)
 
         return shin, shout, sherr
 

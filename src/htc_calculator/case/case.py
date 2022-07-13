@@ -701,9 +701,13 @@ class OFCase(object):
         self.run_split_mesh_regions()
         empty_mesh.run_parafoam()
 
-        print('done')
-
     def run_with_separate_meshes_3(self):
+
+        assembly = self.reference_face.assembly
+
+        for solid in assembly.solids:
+            solid.run_meshing()
+
 
         cut_pipe_layer_solid = self.reference_face.cut_pipe_layer_solid
         os.makedirs(f'{work_dir}/{cut_pipe_layer_solid.txt_id}', exist_ok=True)
@@ -717,12 +721,6 @@ class OFCase(object):
                                              block_mesh_size=100,
                                              feature_edges_level=0,
                                              refine_normal_direction=False)
-
-
-
-        print('done')
-
-
 
 def execute(command, cwd):
     p = Popen(command, stdin=PIPE, stdout=PIPE, stderr=STDOUT, cwd=cwd)

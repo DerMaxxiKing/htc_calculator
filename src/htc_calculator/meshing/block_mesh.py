@@ -20,6 +20,7 @@ from ..construction import Solid, Fluid
 from ..case.boundary_conditions import *
 from ..case.boundary_conditions.user_bcs import *
 from ..case.function_objects import WallHeatFlux, PressureDifferencePatch, TemperatureDifferencePatch, FOMetaMock
+from ..face import Face
 # import trimesh
 
 import FreeCAD
@@ -4397,6 +4398,73 @@ class BlockMesh(object):
                 logger.error(f"{res.stderr.decode('ascii')}")
                 raise Exception(f"Error creating block Mesh:\n{res.stderr.decode('ascii')}")
         return True
+
+    def create_mesh_solid(self, name=None, mesh_tool='snappyHexMesh'):
+
+        from ..solid import Solid as SolidVolume
+
+        if name is None:
+            name = self.name
+
+        mesh_solid = SolidVolume(name=name,
+                                 mesh_tool=mesh_tool,
+                                 id=self.id,
+                                 )
+        mesh_solid.mesh = self
+        mesh_solid._faces = []
+
+        assigned_faces = set([*self.bottom_faces, *self.top_faces, *self.interfaces])
+
+        for boundary in self.mesh.boundaries.values():
+            # Todo: add interfaces
+            assigned_faces.update(boundary.faces)
+            face = Face(fc_face=FCPart.makeShell([x.fc_face for x in boundary.faces]),
+                        id=boundary.txt_id)
+            mesh_solid._faces.append(face)
+            mesh_solid.features[boundary.name] = face
+
+        wall_patches = []
+
+        interfaces_dict = {i: [] for i in list(itertools.combinations(self.mesh.cell_zones, 2))}
+
+        for face in set(self.mesh.faces.values()) - assigned_faces:
+            if face.blocks.__len__() == 1:
+                face.boundary = wall_patch
+                wall_patches.append(face)
+            elif face.blocks.__len__() == 2:
+                if list(face.blocks)[0].cell_zone == list(face.blocks)[1].cell_zone:
+                    continue
+                else:
+                    for i_interface, i_faces in interfaces_dict.items():
+                        if (list(face.blocks)[0].cell_zone in i_interface) and \
+                                (list(face.blocks)[1].cell_zone in i_interface):
+                            i_faces.append(face)
+
+        face = Face(fc_face=FCPart.makeShell([x.fc_face for x in wall_patches]),
+                    id=wall_patch.txt_id)
+        mesh_solid._faces.append(face)
+        mesh_solid.features['walls'] = face
+
+        for interface, i_faces in interfaces_dict.items():
+            if i_faces:
+                face = Face(fc_face=FCPart.makeShell([x.fc_face for x in i_faces]),
+                            name=f'{interface[0].txt_id}_to_{interface[1].txt_id}')
+                mesh_solid._faces.append(face)
+                mesh_solid.features[f'{interface[0].txt_id}_to_{interface[1].txt_id}'] = face
+
+        # add interfaces
+        face = Face(fc_face=FCPart.makeShell([x.fc_face for x in [*self.bottom_faces,
+                                                                  *self.top_faces,
+                                                                  *self.interfaces]]))
+
+        mesh_solid._faces.append(face)
+        mesh_solid.features['interfaces'] = face
+
+        # add default_faces
+
+        mesh_solid.generate_solid_from_faces()
+
+        return mesh_solid
 
     def __repr__(self):
         return f'BlockMesh {self.id} ({self.name}, ' \

@@ -34,13 +34,16 @@ App = FreeCAD
 class Assembly(object):
 
     def __init__(self, *args, **kwargs):
+
+        self._faces = None
+
         self.id = kwargs.get('id', uuid.uuid4())
         # logger.debug(f'initializing Assembly {self.id}')
 
         self.name = kwargs.get('name', None)
         self.normal = kwargs.get('normal', None)
 
-        self.faces = kwargs.get('faces', [])
+        self._faces = kwargs.get('faces', None)
         self.solids = kwargs.get('solids', [])
         self.features = kwargs.get('features', {})
 
@@ -51,6 +54,16 @@ class Assembly(object):
         self.surface_mesh_setup = kwargs.get('_surface_mesh_setup',
                                              kwargs.get('surface_mesh_setup', default_surface_mesh_parameter))
         self.reference_face = kwargs.get('reference_face', None)
+
+    @property
+    def faces(self):
+        if self._faces is None:
+            self._faces = None
+        return self._faces
+
+    @faces.setter
+    def faces(self, faces):
+        self._faces = faces
 
     @property
     def volume(self):

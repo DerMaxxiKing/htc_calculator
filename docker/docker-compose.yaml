@@ -15,10 +15,10 @@ services:
     hostname: openfoam.info.my
     ports:
       - "22:22"
-#    deploy:
-#      resources:
-#        limits:
-#          cpus: '0.95'
+    deploy:
+      resources:
+        limits:
+          cpus: '15'
   htc_calculator:
     image: maxxiking/fc_19_3_ssh:latest
     stdin_open: true # docker run -i

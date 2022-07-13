@@ -10,6 +10,7 @@ from .reference_face import ReferenceFace
 from .tools import project_point_on_line, export_objects
 from .face import Face
 from .solid import Solid, PipeSolid
+from .assembly import Assembly
 from .meshing import block_mesh as imp_block_mesh
 from .meshing.block_mesh import create_blocks_from_2d_mesh, Mesh, BlockMesh, \
     CompBlock, NoNormal, bottom_side_patch, top_side_patch, CellZone, wall_patch, extrude_2d_mesh, Block, \
@@ -79,7 +80,7 @@ class ActivatedReferenceFace(ReferenceFace):
 
         self.reference_edge_id = kwargs.get('start_edge', 0)
 
-        self.integrate_pipe()
+        # self.integrate_pipe()
 
     @property
     def case(self):
@@ -170,6 +171,7 @@ class ActivatedReferenceFace(ReferenceFace):
                               bending_radius=self.bending_radius)
         logger.info(f'Successfully created pipe solid')
         self.pipe.print_info()
+        return self.pipe
 
     @property
     def pipe(self):
@@ -602,8 +604,8 @@ class ActivatedReferenceFace(ReferenceFace):
         layer_thicknesses = np.array([0, *[x.thickness for x in self.component_construction.layers]])
         layer_interface_planes = self.layer_interface_planes
 
-        layer_solids = self.assembly.solids
-        layer_solids.remove(self.assembly.features['pipe'])
+        # layer_solids = self.assembly.solids
+        # layer_solids.remove(self.assembly.features['pipe'])
 
         if blocks is None:
             check_blocks = [*self.pipe_comp_blocks.blocks,
@@ -670,6 +672,9 @@ class ActivatedReferenceFace(ReferenceFace):
         top_face = Face(name='top_face', fc_face=cutted_fc_solid.Shells[0].common(top_faces_shell))
         side_face = Face(name='side_face', fc_face=cutted_fc_solid.Shells[0].common(side_faces_shell))
         common_face = Face(name='pipe_mesh_interface', fc_face=common)
+
+        common_face.surface_mesh_setup.max_refinement_level = 4
+        common_face.surface_mesh_setup.min_refinement_level = 4
 
         cutted_solid = Solid(name='cut_pipe_layer_solid',
                              faces=[base_face, top_face, side_face, common_face])
@@ -922,6 +927,44 @@ class ActivatedReferenceFace(ReferenceFace):
     def run_case(self, *args, **kwargs):
 
         self.case.run()
+
+    def generate_3d_geometry(self):
+        assembly = ReferenceFace.generate_3d_geometry(self)
+        self.pipe = PipeSolid(reference_face=self,
+                              reference_edge_id=self.reference_edge_id,
+                              tube_diameter=self.tube_diameter,
+                              tube_inner_diameter=self.tube_inner_diameter,
+                              tube_distance=self.tube_distance,
+                              tube_side_1_offset=self.tube_side_1_offset,
+                              tube_edge_distance=self.tube_edge_distance,
+                              bending_radius=self.bending_radius,
+                              integrate_pipe=False)
+
+        cutted_solid = self.create_cut_pipe_layer_solid()
+        self.pipe_layer.solid = cutted_solid
+
+        # pipe_solid = Solid(name='pipe_mesh_solid',
+        #                    faces=self.pipe_comp_blocks.fc_solid.Faces)
+        self.update_cell_zone(blocks=self.pipe_mesh.mesh.blocks, mesh=self.pipe_mesh.mesh)
+        mesh_solid = self.pipe_mesh.create_mesh_solid()
+
+        solids = [*[x.solid for x in self.component_construction.layers], mesh_solid]
+
+        for solid in solids:
+            solid.write_of_geo(f'/simulations', separate_interface=False)
+
+        pipe_assembly = Assembly(solids=solids,
+                                 interfaces=[],
+                                 faces=None,
+                                 topology=assembly.topology,
+                                 reference_face=self)
+
+        for i, solid in enumerate([x.solid for x in self.component_construction.layers]):
+            solid
+
+        self.side_1_face = assembly.solids[0].faces[0]
+        self.side_2_face = assembly.solids[-1].faces[1]
+        return pipe_assembly
 
 
 def replace(arr, find, replace):

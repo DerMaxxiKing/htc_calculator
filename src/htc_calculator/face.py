@@ -107,7 +107,6 @@ class Face(object):
                                               LinearDeflection=self.linear_deflection,
                                               AngularDeflection=self.angular_deflection)
             if scale_to_m:
-                print('done')
                 mat = FreeCAD.Matrix()
                 mat.A11 = 0.001     # make the objects two times bigger
                 mat.A22 = 0.001

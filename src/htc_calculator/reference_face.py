@@ -46,6 +46,8 @@ class ReferenceFace(object):
 
     def __init__(self, *args, **kwargs):
 
+        self._solids = None
+
         self.id = kwargs.get('id', uuid.uuid4())
         # logger.debug(f'initializing ReferenceFace {self.id}...')
         self.name = kwargs.get('name', None)
@@ -75,6 +77,12 @@ class ReferenceFace(object):
         self.thickness_mesh_size = kwargs.get('plane_mesh_size', 25)
 
         # logger.debug(f'    initialized ReferenceFace {self.id}')
+
+    @property
+    def solids(self):
+        if self._solids is None:
+            self.generate_3d_geometry()
+        return self._solids
 
     @property
     def points(self):
@@ -124,7 +132,7 @@ class ReferenceFace(object):
     @property
     def assembly(self):
         if self._assembly is None:
-            self.assembly = self.generate_3d_geometry()
+            self._assembly = self.generate_3d_geometry()
         return self._assembly
 
     @assembly.setter
@@ -213,8 +221,14 @@ class ReferenceFace(object):
 
         for i, layer in enumerate(layers):
             layer_base_faces[i] = cur_face
-            # make a offset face from the base face:
-            layer_top_face = Face(fc_face=cur_face.fc_face.makeOffsetShape(layer.thickness * self.layer_dir, 1e-6, False, False, 0, 0, False),
+            # make an offset face from the base face:
+            layer_top_face = Face(fc_face=cur_face.fc_face.makeOffsetShape(layer.thickness * self.layer_dir,
+                                                                           1e-6,
+                                                                           False,
+                                                                           False,
+                                                                           0,
+                                                                           0,
+                                                                           False),
                                   name=f'Layer {i} {layer.name} side 1 face')
             layer_top_faces[i] = layer_top_face
             faces.append(layer_top_faces[i])
@@ -284,6 +298,8 @@ class ReferenceFace(object):
         #                       interfaces=layer_interfaces[layer.id])
         #
         #     layer_solids.append(new_solid)
+
+        self._solids = layer_solids
 
         assembly = Assembly(solids=list(layer_solids.values()),
                             interfaces=interfaces,
@@ -426,9 +442,6 @@ class ReferenceFace(object):
         print(f'out: {ret.stdout.decode()}')
         print(f'err: {ret.stderr.decode()}')
         #
-        print("done.")
-
-        print('done')
 
     def save_fcstd(self, filename):
         """
