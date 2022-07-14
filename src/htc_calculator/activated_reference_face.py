@@ -941,10 +941,9 @@ class ActivatedReferenceFace(ReferenceFace):
                               integrate_pipe=False)
 
         cutted_solid = self.create_cut_pipe_layer_solid()
+        cutted_solid.material = self.pipe_layer.material
         self.pipe_layer.solid = cutted_solid
 
-        # pipe_solid = Solid(name='pipe_mesh_solid',
-        #                    faces=self.pipe_comp_blocks.fc_solid.Faces)
         self.update_cell_zone(blocks=self.pipe_mesh.mesh.blocks, mesh=self.pipe_mesh.mesh)
         mesh_solid = self.pipe_mesh.create_mesh_solid()
 
@@ -959,8 +958,8 @@ class ActivatedReferenceFace(ReferenceFace):
                                  topology=assembly.topology,
                                  reference_face=self)
 
-        for i, solid in enumerate([x.solid for x in self.component_construction.layers]):
-            solid
+        # for i, solid in enumerate([x.solid for x in self.component_construction.layers]):
+        #     solid
 
         self.side_1_face = assembly.solids[0].faces[0]
         self.side_2_face = assembly.solids[-1].faces[1]

@@ -7,7 +7,8 @@ import subprocess
 from subprocess import Popen, PIPE, STDOUT
 from re import findall, MULTILINE
 
-from ..config import work_dir, n_proc
+from ..config import work_dir, n_proc, use_ssh
+from ..ssh import shell_handler
 from ..logger import logger
 from ..meshing.block_mesh import BlockMesh, inlet_patch, outlet_patch, wall_patch, pipe_wall_patch, top_side_patch, \
     bottom_side_patch, CellZone, BlockMeshBoundary, Mesh, CreatePatchDict, export_objects, add_face_contacts, PipeLayerMesh, CyclicAMI
@@ -289,19 +290,23 @@ class OFCase(object):
 
     def run_check_mesh(self):
         logger.info(f'Checking mesh....')
-        res = subprocess.run(
-            ["/bin/bash", "-i", "-c", "checkMesh 2>&1 | tee checkMesh.log"],
-            capture_output=True,
-            cwd=self.case_dir,
-            user='root')
-        if res.returncode == 0:
-            output = res.stdout.decode('ascii')
-            if output.find('FOAM FATAL ERROR') != -1:
-                logger.error(f'Error decomposePar:\n\n{output}')
-                raise Exception(f'Error decomposePar:\n\n{output}')
-            logger.info(f"Successfully ran checkMesh \n\n{output}")
+
+        if use_ssh:
+            shin, shout, sherr = shell_handler.run_check_mesh(self.case_dir)
         else:
-            logger.error(f"{res.stderr.decode('ascii')}")
+            res = subprocess.run(
+                ["/bin/bash", "-i", "-c", "checkMesh 2>&1 | tee checkMesh.log"],
+                capture_output=True,
+                cwd=self.case_dir,
+                user='root')
+            if res.returncode == 0:
+                output = res.stdout.decode('ascii')
+                if output.find('FOAM FATAL ERROR') != -1:
+                    logger.error(f'Error decomposePar:\n\n{output}')
+                    raise Exception(f'Error decomposePar:\n\n{output}')
+                logger.info(f"Successfully ran checkMesh \n\n{output}")
+            else:
+                logger.error(f"{res.stderr.decode('ascii')}")
 
         return True
 
@@ -707,7 +712,7 @@ class OFCase(object):
 
         for solid in assembly.solids:
             solid.run_meshing()
-
+            solid.run_check_mesh()
 
         cut_pipe_layer_solid = self.reference_face.cut_pipe_layer_solid
         os.makedirs(f'{work_dir}/{cut_pipe_layer_solid.txt_id}', exist_ok=True)

@@ -171,6 +171,31 @@ class ShellHandler:
 
             return shin, shout, sherr
 
+    def run_check_mesh(self, workdir, options=None):
+        if options is None:
+            cmd = 'checkMesh 2>&1 | tee checkMesh.log'
+        else:
+            cmd = 'checkMesh ' + options + ' 2>&1 | tee checkMesh.log'
+        shin, shout, sherr = self.execute(cmd, cwd=workdir)
+
+        if sherr:
+            logger.error(f"Error running checkMesh: \n {''.join(sherr)}")
+            raise Exception(f"Error running checkMesh:  \n {''.join(sherr)}")
+        else:
+            output = ''.join(shout)
+            if output.find('FOAM FATAL ERROR') != -1:
+                logger.error(f'Error in checkMesh:\n\n{output}')
+                raise Exception(f"Error running checkMesh:  \n {''.join(sherr)}")
+            logger.info(f"Successfully checked mesh:\n"
+                        f"Directory: {workdir}\n\n "
+                        f"{output}")
+            if output[output.find('Failed'):output.find('End')]:
+                logger.warning(output[output.find('Failed'):output.find('End')])
+
+        self.execute(f'paraFoam -touchAll', cwd=workdir)
+
+        return shin, shout, sherr
+
     def run_block_mesh(self, workdir, options=None):
         if options is None:
             cmd = 'blockMesh'

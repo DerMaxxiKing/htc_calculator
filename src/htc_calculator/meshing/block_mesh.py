@@ -3583,8 +3583,8 @@ class CellZone(object, metaclass=CellZoneMetaMock):
     def __init__(self, *args, **kwargs):
         self._name = None
         self.name = kwargs.get('name', None)
-        self.id = next(CellZone.id_iter)
-        self.dict_id = next(CellZone.dict_id_iter)
+        self.id = kwargs.get('id', next(CellZone.id_iter))
+        self.dict_id = kwargs.get('dict_id', next(CellZone.dict_id_iter))
         self.material = kwargs.get('material', None)
         self.boundaries = kwargs.get('boundaries', [])
         self.case = kwargs.get('case', None)
@@ -3613,10 +3613,13 @@ class CellZone(object, metaclass=CellZoneMetaMock):
 
     @property
     def txt_id(self):
-        if isinstance(self.dict_id, uuid.UUID):
-            return 'a' + str(self.dict_id.hex)
+        if self.material is None:
+            if isinstance(self.dict_id, uuid.UUID):
+                return 'a' + str(self.dict_id.hex)
+            else:
+                return 'a' + str(self.dict_id)
         else:
-            return 'a' + str(self.dict_id)
+            return self.material.txt_id
 
     def init_directories(self, case_dir):
         os.makedirs(os.path.join(case_dir, 'constant', str(self.txt_id)), exist_ok=True)
@@ -4218,20 +4221,23 @@ class BlockMesh(object):
             raise Exception(f"Error blockTopology vtk:\n{res.stderr.decode('ascii')}")
 
     def run_check_mesh(self):
-        logger.info(f'Checking mesh....')
-        res = subprocess.run(
-            ["/bin/bash", "-i", "-c", "checkMesh 2>&1 | tee checkMesh.log"],
-            capture_output=True,
-            cwd=self.case_dir,
-            user='root')
-        if res.returncode == 0:
-            output = res.stdout.decode('ascii')
-            if output.find('FOAM FATAL ERROR') != -1:
-                logger.error(f'Error decomposePar:\n\n{output}')
-                raise Exception(f'Error decomposePar:\n\n{output}')
-            logger.info(f"Successfully ran checkMesh \n\n{output}")
+        if use_ssh:
+            shin, shout, sherr = shell_handler.run_check_mesh(self.case_dir)
         else:
-            logger.error(f"{res.stderr.decode('ascii')}")
+            logger.info(f'Checking mesh....')
+            res = subprocess.run(
+                ["/bin/bash", "-i", "-c", "checkMesh 2>&1 | tee checkMesh.log"],
+                capture_output=True,
+                cwd=self.case_dir,
+                user='root')
+            if res.returncode == 0:
+                output = res.stdout.decode('ascii')
+                if output.find('FOAM FATAL ERROR') != -1:
+                    logger.error(f'Error decomposePar:\n\n{output}')
+                    raise Exception(f'Error decomposePar:\n\n{output}')
+                logger.info(f"Successfully ran checkMesh \n\n{output}")
+            else:
+                logger.error(f"{res.stderr.decode('ascii')}")
 
         return True
 

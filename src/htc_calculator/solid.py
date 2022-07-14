@@ -71,7 +71,7 @@ class Solid(object):
         self.case_dir = kwargs.get('case_dir', None)     #
         self.mesh_tool = kwargs.get('mesh_tool', 'snappyHexMesh')     # Mesh tool: 'snappyHexMesh' or 'blockMesh'
 
-        self.cell_zone = kwargs.get('cell_zone', None)
+        self.material = kwargs.get('material', None)
 
     @property
     def case_dir(self):
@@ -455,7 +455,7 @@ class Solid(object):
 
         _ = self.base_block_mesh
 
-        if (self.base_block_mesh is None) or create_block_mesh:
+        if self.base_block_mesh is None:
             self.create_base_block_mesh(directory=self.case_dir,
                                         normal=normal,
                                         cell_size=block_mesh_size,
@@ -466,7 +466,8 @@ class Solid(object):
 
         self.write_of_geo(geo_dir, separate_interface=False)
 
-        shm = SnappyHexMesh(assembly=self,
+        shm = SnappyHexMesh(name='SHM ' + self.name,
+                            assembly=self,
                             allow_free_standing_zone_faces=False,
                             feature_edges_level=feature_edges_level)
         # shm.create_surface_feature_extract_dict(case_dir=self.case_dir)
@@ -479,7 +480,7 @@ class Solid(object):
     def create_base_block_mesh(self,
                                directory=None,
                                normal=None,
-                               cell_size=250,
+                               cell_size=200,
                                scale=10,
                                refine_normal_direction=True):
 
@@ -513,12 +514,20 @@ class Solid(object):
 
         vertices = [BlockMeshVertex(position=x) for x in block_vertices]
 
+        if self.material is not None:
+            cell_zone = CellZone(material=self.material,
+                                 mesh=block_mesh.mesh)
+        else:
+            cell_zone = CellZone(material=None,
+                                 mesh=block_mesh.mesh)
+
         new_block = Block(vertices=vertices,
                           name=self.txt_id + 'base block',
                           auto_cell_size=True,
                           extruded=False,
                           grading=[1, 1, 1],
-                          mesh=block_mesh.mesh)
+                          mesh=block_mesh.mesh,
+                          cell_zone=cell_zone)
 
         num_cells = [ceil(new_block.edge0.length / cell_size),
                      ceil(new_block.edge3.length / cell_size),
@@ -528,16 +537,15 @@ class Solid(object):
         if refine_normal_direction:
             if normal is not None:
                 if np.allclose(new_block.edge0.direction, normal) or np.allclose(new_block.edge0.direction, -normal):
-                    num_cells[0] = ceil(new_block.edge0.length / 25)
+                    num_cells[0] = ceil(new_block.edge0.length / 50)
                 if np.allclose(new_block.edge3.direction, normal) or np.allclose(new_block.edge3.direction, -normal):
-                    num_cells[1] = ceil(new_block.edge3.length / 25)
+                    num_cells[1] = ceil(new_block.edge3.length / 50)
                 if np.allclose(new_block.edge8.direction, normal) or np.allclose(new_block.edge8.direction, -normal):
-                    num_cells[2] = ceil(new_block.edge8.length / 25)
+                    num_cells[2] = ceil(new_block.edge8.length / 50)
 
         for i, num in enumerate(num_cells):
-            # ToDo fix this
-            if num_cells:
-                num_cells[num_cells < 2] = 2
+            if num < 3:
+                num_cells[i] = 3
 
         new_block.num_cells = num_cells
 
@@ -585,6 +593,9 @@ class Solid(object):
             self.mesh.run_parafoam()
 
         logger.info(f'Successfully ran meshing for solid {self.name} in {self.case_dir}')
+
+    def run_check_mesh(self):
+        self.mesh.run_check_mesh(case_dir=self.case_dir)
 
     def __repr__(self):
         rep = f'Solid {self.name} {self.id} {self.Volume}'

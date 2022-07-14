@@ -134,6 +134,10 @@ class SnappyHexMesh(object):
             * *layer_definition* (``str``) -- xxxxx
         """
 
+        self._base_block_mesh = None
+
+        self.base_block_mesh = kwargs.get('base_block_mesh', None)
+
         self._assembly = kwargs.get('_assembly', kwargs.get('assembly', None))
 
         self._id = kwargs.get('_id', kwargs.get('id', uuid.uuid4()))
@@ -563,6 +567,16 @@ class SnappyHexMesh(object):
             return
         self._mesh_quality_setup = value
 
+    @property
+    def base_block_mesh(self):
+        if self._base_block_mesh is None:
+            self._base_block_mesh = self.create_base_block_mesh()
+        return self._base_block_mesh
+
+    @base_block_mesh.setter
+    def base_block_mesh(self, value):
+        self._base_block_mesh = value
+
     def create_entry(self, attr, key, value=None):
 
         if value is None:
@@ -870,9 +884,15 @@ class SnappyHexMesh(object):
             logging.error(f'{self.name}: no case_dir')
             return
 
+        logger.info(f'running snappyHexMesh:\n'
+                    f'Directory: {case_dir},\n'
+                    f'Mesh: {self.name}, {self.id}')
+
         if use_ssh:
+            logger.info(f'using ssh')
             shell_handler.run_shm(case_dir, parallel=True)
         else:
+            logger.info(f'using local ')
             if parallel:
                 # num_proc = floor(cpu_count()/2)
                 num_proc = 6
@@ -882,3 +902,36 @@ class SnappyHexMesh(object):
                 with open(os.path.join(case_dir, 'system', 'decomposeParDict'), 'w') as sfed:
                     sfed.write(s)
             run_shm(case_dir, parallel=parallel)
+
+        logger.info(f'Successfully ran snappyHexMesh:\n'
+                    f'Directory: {case_dir}')
+
+    def run_check_mesh(self, case_dir=None):
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        if case_dir is None:
+            logging.error(f'{self.name}: no case_dir')
+            return
+
+        if use_ssh:
+            shell_handler.run_check_mesh(case_dir)
+        else:
+            logger.info(f'Checking mesh....')
+            res = subprocess.run(
+                ["/bin/bash", "-i", "-c", "checkMesh 2>&1 | tee checkMesh.log"],
+                capture_output=True,
+                cwd=self.case_dir,
+                user='root')
+            if res.returncode == 0:
+                output = res.stdout.decode('ascii')
+                if output.find('FOAM FATAL ERROR') != -1:
+                    logger.error(f'Error decomposePar:\n\n{output}')
+                    raise Exception(f'Error decomposePar:\n\n{output}')
+                logger.info(f"Successfully ran checkMesh \n\n{output}")
+            else:
+                logger.error(f"{res.stderr.decode('ascii')}")
+            raise NotImplementedError()
+
+    def create_base_block_mesh(self):
+        raise NotImplementedError()
