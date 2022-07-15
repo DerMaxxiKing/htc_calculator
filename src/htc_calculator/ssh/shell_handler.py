@@ -191,6 +191,8 @@ class ShellHandler:
                         f"{output}")
             if output[output.find('Failed'):output.find('End')]:
                 logger.warning(output[output.find('Failed'):output.find('End')])
+            if output[output.find('Mesh OK'):output.find('End')]:
+                logger.info(f'Mesh is ok!')
 
         self.execute(f'paraFoam -touchAll', cwd=workdir)
 
@@ -218,6 +220,60 @@ class ShellHandler:
         self.execute(f'paraFoam -touchAll', cwd=workdir)
 
         return shin, shout, sherr
+
+    def run_split_mesh_regions(self, workdir, options=None):
+        if options is None:
+            cmd = 'splitMeshRegions'
+        else:
+            cmd = 'splitMeshRegions ' + options
+        shin, shout, sherr = self.execute(cmd, cwd=workdir)
+        if sherr:
+            logger.error(f"Error running splitMeshRegions: \n {''.join(sherr)}")
+            raise Exception(f"Error running splitMeshRegions:  \n {''.join(sherr)}")
+        else:
+            output = ''.join(shout)
+            if output.find('FOAM FATAL ERROR') != -1:
+                logger.error(f'Error running splitMeshRegions:\n\n{output}')
+                raise Exception(f"Error running splitMeshRegions:  \n {''.join(sherr)}")
+            logger.info(f"Successfully ran splitMeshRegions:\n"
+                        f"Directory: {workdir}\n\n "
+                        f"{output}")
+        self.execute(f'paraFoam -touchAll', cwd=workdir)
+
+        return shin, shout, sherr
+
+    def run_merge_meshes(self, workdir, options=None, parallel=True, overwrite=True):
+
+        cmd = 'mergeMeshes'
+
+        if options is not None:
+            cmd = cmd + options
+
+        if parallel:
+            cmd = cmd + ' -parallel'
+
+        if overwrite:
+            cmd = cmd + ' -overwrite'
+
+        shin, shout, sherr = self.execute(cmd, cwd=workdir)
+        if sherr:
+            logger.error(f"Error running {cmd}: \n {''.join(sherr)}")
+            raise Exception(f"Error running {cmd}:  \n {''.join(sherr)}")
+        else:
+            output = ''.join(shout)
+            if output.find('FOAM FATAL ERROR') != -1:
+                logger.error(f'Error running {cmd}:\n\n{output}')
+                raise Exception(f"Error running {cmd}:  \n {''.join(sherr)}")
+            logger.info(f"Successfully ran {cmd}:\n"
+                        f"Directory: {workdir}\n\n "
+                        f"{output}")
+        self.execute(f'paraFoam -touchAll', cwd=workdir)
+
+    def copy_mesh(self, source, destination, time=None):
+
+        return True
+
+
 
 
 sh = ShellHandler(host, ssh_user, ssh_pwd)

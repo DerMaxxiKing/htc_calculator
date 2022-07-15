@@ -929,6 +929,9 @@ class ActivatedReferenceFace(ReferenceFace):
         self.case.run()
 
     def generate_3d_geometry(self):
+
+        logger.info(f'Creating 3D geometry for ActivatedReferenceFace {self.name} {self.id}')
+
         assembly = ReferenceFace.generate_3d_geometry(self)
         self.pipe = PipeSolid(reference_face=self,
                               reference_edge_id=self.reference_edge_id,
@@ -963,6 +966,9 @@ class ActivatedReferenceFace(ReferenceFace):
 
         self.side_1_face = assembly.solids[0].faces[0]
         self.side_2_face = assembly.solids[-1].faces[1]
+
+        logger.info(f'Successfully created 3D geometry for ActivatedReferenceFace {self.name} {self.id}')
+
         return pipe_assembly
 
 

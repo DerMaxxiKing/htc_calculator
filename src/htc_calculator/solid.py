@@ -243,7 +243,7 @@ class Solid(object):
     def generate_solid_from_faces(self):
 
         # logger.debug(f'generating solid from faces: {self.id}')
-        start_time = time.time()
+        # start_time = time.time()
 
         faces = []
         [faces.extend(x.fc_face.Faces) for x in self.faces]
@@ -571,6 +571,7 @@ class Solid(object):
                     split_mesh_regions=True):
 
         logger.info(f'Running meshing for solid {self.name} in {self.case_dir}')
+        st_time = time.time()
 
         from .meshing.snappy_hex_mesh import SnappyHexMesh
 
@@ -585,14 +586,16 @@ class Solid(object):
 
         elif isinstance(self.mesh, BlockMesh):
             if init_case:
-                self.mesh.init_case()
-            self.mesh.run_block_mesh()
+                self.mesh.init_case(case_dir=self.case_dir)
+            self.mesh.run_block_mesh(case_dir=self.case_dir)
             if split_mesh_regions:
-                self.mesh.run_split_mesh_regions()
-            self.mesh.run_check_mesh()
-            self.mesh.run_parafoam()
+                self.mesh.run_split_mesh_regions(case_dir=self.case_dir)
+            self.mesh.run_check_mesh(case_dir=self.case_dir)
+            self.mesh.run_parafoam(case_dir=self.case_dir)
 
-        logger.info(f'Successfully ran meshing for solid {self.name} in {self.case_dir}')
+        et_time = time.time()
+        logger.info(f'Successfully ran meshing for solid {self.name} in {self.case_dir}\n'
+                    f'Mesh creation took {et_time - st_time} seconds')
 
     def run_check_mesh(self):
         self.mesh.run_check_mesh(case_dir=self.case_dir)

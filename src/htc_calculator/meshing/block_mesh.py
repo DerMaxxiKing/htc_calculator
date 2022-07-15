@@ -1,6 +1,7 @@
 import copy
 import posix
 import re
+from copy import deepcopy
 import subprocess
 import functools
 import operator
@@ -10,7 +11,7 @@ import itertools
 import numpy as np
 from re import findall, MULTILINE
 from functools import lru_cache, wraps
-from ..config import use_ssh
+from ..config import use_ssh, work_dir
 if use_ssh:
     from ..ssh import shell_handler
 from ..logger import logger
@@ -3868,7 +3869,7 @@ class CompBlock(object, metaclass=CompBlockMetaMock):
 
 class BlockMesh(object):
 
-    default_path = '/tmp/'
+    default_path = work_dir
 
     @classmethod
     def join_meshes(cls, meshes, mesh_name):
@@ -4048,35 +4049,50 @@ class BlockMesh(object):
 
         return face_lookup_dict
 
-    def init_case(self):
-        logger.info(f'Initializing Block Mesh in {self.case_dir}')
+    def init_case(self, case_dir=None):
 
-        os.makedirs(self.case_dir, exist_ok=True)
-        os.makedirs(os.path.join(self.case_dir, '0'), exist_ok=True)
-        os.makedirs(os.path.join(self.case_dir, 'constant'), exist_ok=True)
-        os.makedirs(os.path.join(self.case_dir, 'system'), exist_ok=True)
+        if case_dir is None:
+            case_dir = self.case_dir
 
-        if not os.path.isfile(os.path.join(self.case_dir, 'system', "controlDict")):
-            self.write_control_dict()
-        if not os.path.isfile(os.path.join(self.case_dir, 'system', "fvSchemes")):
-            self.write_fv_schemes()
-        if not os.path.isfile(os.path.join(self.case_dir, 'system', "fvSolution")):
-            self.write_fv_solution()
-        self.write_block_mesh_dict()
+        logger.info(f'Initializing Block Mesh in {case_dir}')
+
+        os.makedirs(case_dir, exist_ok=True)
+        os.makedirs(os.path.join(case_dir, '0'), exist_ok=True)
+        os.makedirs(os.path.join(case_dir, 'constant'), exist_ok=True)
+        os.makedirs(os.path.join(case_dir, 'system'), exist_ok=True)
+
+        if not os.path.isfile(os.path.join(case_dir, 'system', "controlDict")):
+            self.write_control_dict(case_dir=case_dir)
+        if not os.path.isfile(os.path.join(case_dir, 'system', "fvSchemes")):
+            self.write_fv_schemes(case_dir=case_dir)
+        if not os.path.isfile(os.path.join(case_dir, 'system', "fvSolution")):
+            self.write_fv_solution(case_dir=case_dir)
+        self.write_block_mesh_dict(case_dir=case_dir)
 
         logger.info('Case successfully initialized')
 
-    def write_control_dict(self):
+    def write_control_dict(self, case_dir=None):
 
-        with open(os.path.join(self.case_dir, 'system', "controlDict"), mode="w") as f:
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        with open(os.path.join(case_dir, 'system', "controlDict"), mode="w") as f:
             f.write(self.control_dict)
 
-    def write_fv_schemes(self):
-        with open(os.path.join(self.case_dir, 'system', "fvSchemes"), "w") as f:
+    def write_fv_schemes(self, case_dir=None):
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        with open(os.path.join(case_dir, 'system', "fvSchemes"), "w") as f:
             f.write(self.fvschemes)
 
-    def write_fv_solution(self):
-        with open(os.path.join(self.case_dir, 'system', "fvSolution"), "w") as f:
+    def write_fv_solution(self, case_dir=None):
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        with open(os.path.join(case_dir, 'system', "fvSolution"), "w") as f:
             f.write(self.fvsolution)
 
     def create_block_mesh_dict(self):
@@ -4144,8 +4160,11 @@ class BlockMesh(object):
 
         return template
 
-    def write_block_mesh_dict(self):
-        with open(os.path.join(self.case_dir, 'system', "blockMeshDict"), "w") as f:
+    def write_block_mesh_dict(self, case_dir=None):
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        with open(os.path.join(case_dir, 'system', "blockMeshDict"), "w") as f:
             f.write(self.block_mesh_dict)
 
     def fix_inconsistent_block_faces(self, block_ids):
@@ -4207,11 +4226,14 @@ class BlockMesh(object):
                 logger.error(f"{res.stderr.decode('ascii')}")
                 raise Exception(f"Error exporting blockTopology:\n{res.stderr.decode('ascii')}")
 
-    def obj_to_vtk(self):
+    def obj_to_vtk(self, case_dir=None):
+        if case_dir is None:
+            case_dir = self.case_dir
+
         logger.info(f'Creating blockTopology vtk....')
         res = subprocess.run(["/bin/bash", "-i", "-c", "objToVTK blockTopology.obj blockTopology.vtk"],
                              capture_output=True,
-                             cwd=self.case_dir,
+                             cwd=case_dir,
                              user='root')
         if res.returncode == 0:
             output = res.stdout.decode('ascii')
@@ -4220,9 +4242,13 @@ class BlockMesh(object):
             logger.error(f"{res.stderr.decode('ascii')}")
             raise Exception(f"Error blockTopology vtk:\n{res.stderr.decode('ascii')}")
 
-    def run_check_mesh(self):
+    def run_check_mesh(self, case_dir=None):
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
         if use_ssh:
-            shin, shout, sherr = shell_handler.run_check_mesh(self.case_dir)
+            shin, shout, sherr = shell_handler.run_check_mesh(case_dir)
         else:
             logger.info(f'Checking mesh....')
             res = subprocess.run(
@@ -4329,21 +4355,28 @@ class BlockMesh(object):
 
         pass
 
-    def run_split_mesh_regions(self):
-        logger.info(f'Splitting Mesh Regions....')
-        res = subprocess.run(
-            ["/bin/bash", "-i", "-c", "splitMeshRegions -cellZonesOnly -overwrite 2>&1 | tee splitMeshRegions.log"],
-            capture_output=True,
-            cwd=self.case_dir,
-            user='root')
-        if res.returncode == 0:
-            output = res.stdout.decode('ascii')
-            if output.find('FOAM FATAL ERROR') != -1:
-                logger.error(f'Error splitting Mesh Regions:\n\n{output}')
-                raise Exception(f'Error splitting Mesh Regions:\n\n{output}')
-            logger.info(f"Successfully splitted Mesh Regions \n\n{output}")
+    def run_split_mesh_regions(self, case_dir=None):
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        if use_ssh:
+            shin, shout, sherr = shell_handler.run_split_mesh_regions(case_dir, ' -cellZonesOnly -overwrite 2>&1 | tee splitMeshRegions.log')
         else:
-            logger.error(f"{res.stderr.decode('ascii')}")
+            logger.info(f'Splitting Mesh Regions....')
+            res = subprocess.run(
+                ["/bin/bash", "-i", "-c", "splitMeshRegions -cellZonesOnly -overwrite 2>&1 | tee splitMeshRegions.log"],
+                capture_output=True,
+                cwd=case_dir,
+                user='root')
+            if res.returncode == 0:
+                output = res.stdout.decode('ascii')
+                if output.find('FOAM FATAL ERROR') != -1:
+                    logger.error(f'Error splitting Mesh Regions:\n\n{output}')
+                    raise Exception(f'Error splitting Mesh Regions:\n\n{output}')
+                logger.info(f"Successfully splitted Mesh Regions \n\n{output}")
+            else:
+                logger.error(f"{res.stderr.decode('ascii')}")
 
         return True
 
@@ -4366,7 +4399,7 @@ class BlockMesh(object):
         logger.info(f'Generating mesh....')
 
         if use_ssh:
-            shin, shout, sherr = shell_handler.run_block_mesh(self.case_dir, '-noFunctionObjects -noClean')
+            shin, shout, sherr = shell_handler.run_block_mesh(case_dir, '-noFunctionObjects -noClean')
         else:
             res = subprocess.run(["/bin/bash", "-i", "-c", "blockMesh -noFunctionObjects 2>&1 | tee blockMesh.log"],
                                  capture_output=True,
@@ -4417,6 +4450,7 @@ class BlockMesh(object):
                                  id=self.id,
                                  )
         mesh_solid.mesh = self
+        mesh_solid.mesh.case_dir = mesh_solid.case_dir
         mesh_solid._faces = []
 
         assigned_faces = set([*self.bottom_faces, *self.top_faces, *self.interfaces])

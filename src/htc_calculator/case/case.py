@@ -209,7 +209,8 @@ class OFCase(object):
 
     def init_case(self):
 
-        logger.info('Initializing case...')
+        logger.info(f'Initializing case {self.name}\n, {self.id}'
+                    f'Direction {self.case_dir}')
 
         os.makedirs(self.case_dir, exist_ok=True)
         os.makedirs(os.path.join(self.case_dir, '0'), exist_ok=True)
@@ -417,6 +418,56 @@ class OFCase(object):
         combined_mesh.case_dir = self.case_dir
 
         return combined_mesh
+
+    def merge_mesh(self, mesh, case_dir=None, other_case_dir=None, overwrite=True, add_ami=True):
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        if other_case_dir is None:
+            other_case_dir = mesh.case_dir
+
+        if overwrite:
+            overwrite_txt = ' -overwrite'
+        else:
+            overwrite_txt = ''
+
+        logger.info(f'Merging meshes {self} and {mesh}')
+
+        if use_ssh:
+            shell_handler.run_merge_meshes(case_dir,
+                                           parallel=True,
+                                           options=' -noFunctionObjects',
+                                           overwrite=overwrite)
+        else:
+            res = subprocess.run(["/bin/bash", "-i", "-c", f"mergeMeshes {case_dir} {other_case_dir} {overwrite_txt} -noFunctionObjects"],
+                                 capture_output=True,
+                                 cwd=case_dir,
+                                 user='root')
+
+            if res.returncode == 0:
+                output = res.stdout.decode('ascii')
+                logger.info(f"Successfully merged meshes \n\n{output}")
+            else:
+                logger.error(f"Error Merging meshes:\n{res.stderr.decode('ascii')}")
+
+        if add_ami:
+            amis = []
+
+            for name, boundary in mesh.mesh.boundaries.items():
+                if not isinstance(boundary, CyclicAMI):
+                    continue
+            if boundary.neighbour_patch in self.mesh.boundaries.values():
+                amis.extend([boundary, boundary.neighbour_patch])
+
+            cpd = CreatePatchDict(case_dir=case_dir,
+                                  boundaries=amis)
+            cpd.write_create_patch_dict()
+            cpd.run(case_dir=self.case_dir)
+
+            return cpd
+        else:
+            return True
 
     def run(self):
 
@@ -708,11 +759,21 @@ class OFCase(object):
 
     def run_with_separate_meshes_3(self):
 
+        self.init_case()
+        self.write_control_dict()
+        self.write_decompose_par_dict()
+        self.write_all_run()
+        self.write_all_clean()
+
         assembly = self.reference_face.assembly
 
-        for solid in assembly.solids:
-            solid.run_meshing()
+        for i, solid in enumerate(assembly.solids):
+            solid.run_meshing(split_mesh_regions=False)
             solid.run_check_mesh()
+            if i == 0:
+                shell_handler.copy_mesh(self.case_dir, solid.mesh.case_dir)
+            else:
+                self.merge_mesh(solid.mesh)
 
         cut_pipe_layer_solid = self.reference_face.cut_pipe_layer_solid
         os.makedirs(f'{work_dir}/{cut_pipe_layer_solid.txt_id}', exist_ok=True)
@@ -726,6 +787,7 @@ class OFCase(object):
                                              block_mesh_size=100,
                                              feature_edges_level=0,
                                              refine_normal_direction=False)
+
 
 def execute(command, cwd):
     p = Popen(command, stdin=PIPE, stdout=PIPE, stderr=STDOUT, cwd=cwd)

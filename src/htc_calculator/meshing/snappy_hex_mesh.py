@@ -9,8 +9,9 @@ import subprocess
 from shutil import copyfile
 from ..config import use_ssh
 from ..ssh import shell_handler
-from multiprocessing import cpu_count
-from math import floor
+from . import mesh_config
+# from multiprocessing import cpu_count
+# from math import floor
 
 try:
     import importlib.resources as pkg_resources
@@ -172,22 +173,31 @@ class SnappyHexMesh(object):
 
         self._location_in_mesh = location_in_mesh
 
-        self._locations_in_mesh = kwargs.get('_locations_in_mesh', kwargs.get('locations_in_mesh', None))
+        self._locations_in_mesh = kwargs.get('_locations_in_mesh',
+                                             kwargs.get('locations_in_mesh', None))
 
-        self._max_local_cells = kwargs.get('_max_local_cells', kwargs.get('max_local_cells', int(2e+7)))
+        self._max_local_cells = kwargs.get('_max_local_cells',
+                                           kwargs.get('max_local_cells', mesh_config.max_local_cells))
 
-        self._max_global_cells = kwargs.get('_max_global_cells', kwargs.get('max_global_cells', int(3e+7)))
+        self._max_global_cells = kwargs.get('_max_global_cells',
+                                            kwargs.get('max_global_cells', mesh_config.max_global_cells))
 
-        self._min_refinement_cells = kwargs.get('_min_refinement_cells', kwargs.get('min_refinement_cells', 100))
+        self._min_refinement_cells = kwargs.get('_min_refinement_cells',
+                                                kwargs.get('min_refinement_cells', mesh_config.min_refinement_cells))
 
-        self._max_load_unbalance = kwargs.get('_max_load_unbalance', kwargs.get('max_load_unbalance', 0.2))
+        self._max_load_unbalance = kwargs.get('_max_load_unbalance',
+                                              kwargs.get('max_load_unbalance', mesh_config.max_load_unbalance))
 
-        self._n_cells_between_levels = kwargs.get('_n_cells_between_levels', kwargs.get('n_cells_between_levels', 2))
+        self._n_cells_between_levels = kwargs.get('_n_cells_between_levels',
+                                                  kwargs.get('n_cells_between_levels',
+                                                             mesh_config.n_cells_between_levels))
 
-        self._resolve_feature_angle = kwargs.get('_resolve_feature_angle', kwargs.get('resolve_feature_angle', 30))
+        self._resolve_feature_angle = kwargs.get('_resolve_feature_angle',
+                                                 kwargs.get('resolve_feature_angle', mesh_config.resolve_feature_angle))
 
         self._allow_free_standing_zone_faces = kwargs.get('_allow_free_standing_zone_faces',
-                                                          kwargs.get('allow_free_standing_zone_faces', False))
+                                                          kwargs.get('allow_free_standing_zone_faces',
+                                                                     mesh_config.allow_free_standing_zone_faces))
 
         self._features = kwargs.get('_features', kwargs.get('features', None))
 
@@ -195,23 +205,30 @@ class SnappyHexMesh(object):
 
         self._refinement_regions = kwargs.get('_refinement_regions', kwargs.get('refinement_regions', None))
 
-        self._n_smooth_patch = kwargs.get('_n_smooth_patch', kwargs.get('n_smooth_patch', 5))
+        self._n_smooth_patch = kwargs.get('_n_smooth_patch',
+                                          kwargs.get('n_smooth_patch', mesh_config.n_smooth_patch))
 
-        self._tolerance = kwargs.get('_tolerance', kwargs.get('tolerance', 10.0))
+        self._tolerance = kwargs.get('_tolerance',
+                                     kwargs.get('tolerance', mesh_config.tolerance))
 
-        self._n_solve_iter = kwargs.get('_n_solve_iter', kwargs.get('n_solve_iter', 20))
+        self._n_solve_iter = kwargs.get('_n_solve_iter',
+                                        kwargs.get('n_solve_iter', mesh_config.n_solve_iter))
 
-        self._n_relax_iter = kwargs.get('_n_relax_iter', kwargs.get('n_relax_iter', 10))
+        self._n_relax_iter = kwargs.get('_n_relax_iter',
+                                        kwargs.get('n_relax_iter', mesh_config.n_relax_iter))
 
-        self._n_feature_snap_iter = kwargs.get('_n_feature_snap_iter', kwargs.get('n_feature_snap_iter', 30))
+        self._n_feature_snap_iter = kwargs.get('_n_feature_snap_iter',
+                                               kwargs.get('n_feature_snap_iter', mesh_config.n_feature_snap_iter))
 
         self._implicit_feature_snap = kwargs.get('_implicit_feature_snap',
-                                                 kwargs.get('implicit_feature_snap', False))
+                                                 kwargs.get('implicit_feature_snap', mesh_config.implicit_feature_snap))
 
-        self._explicit_feature_snap = kwargs.get('_explicit_feature_snap', kwargs.get('explicit_feature_snap', True))
+        self._explicit_feature_snap = kwargs.get('_explicit_feature_snap',
+                                                 kwargs.get('explicit_feature_snap', mesh_config.explicit_feature_snap))
 
         self._multi_region_feature_snap = kwargs.get('_multi_region_feature_snap',
-                                                     kwargs.get('multi_region_feature_snap', False))
+                                                     kwargs.get('multi_region_feature_snap',
+                                                                mesh_config.multi_region_feature_snap))
 
         self._layer_definition = kwargs.get('_layer_definition',
                                             kwargs.get('layer_definition', default_layer_definition))
@@ -231,7 +248,8 @@ class SnappyHexMesh(object):
 
         self._num_subdomains = kwargs.get('_num_subdomains', kwargs.get('num_subdomains', np.array([1, 1, 1])))
 
-        self.feature_edges_level = kwargs.get('feature_edges_level', 0)
+        self.feature_edges_level = kwargs.get('feature_edges_level',
+                                              kwargs.get('feature_edges_level', mesh_config.feature_edges_level))
 
         self.strict_region_snap = False
 
