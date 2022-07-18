@@ -87,6 +87,8 @@ class OFCase(object):
         self.function_objects = FOMetaMock.instances
         self.combined_mesh = kwargs.get('combined_mesh', None)
 
+        self.cell_zones = []
+
     @property
     def n_proc(self):
         if self._n_proc is None:
@@ -761,6 +763,8 @@ class OFCase(object):
         self.init_case()
         self.write_control_dict()
         self.write_decompose_par_dict()
+        self.write_fv_schemes()
+        self.write_fv_solution()
         self.write_all_run()
         self.write_all_clean()
 
@@ -779,7 +783,24 @@ class OFCase(object):
 
         logger.info(f'Splitting mesh regions')
         shell_handler.run_split_mesh_regions(workdir=self.case_dir)
-        logger.info(f'Splitting mesh regions')
+        logger.info(f'Successfully split mesh regions')
+
+        materials = set()
+
+        _ = [materials.update([y.material for y in x.cell_zones]) for x in assembly.solids]
+        cell_zones = [x.cell_zone for x in materials]
+
+        for material in materials:
+            material.cell_zone.write_to_of(self.case_dir)
+        # write region properties:
+        write_region_properties(cell_zones, self.case_dir)
+
+        # write boundary conditions
+        for i, layer in enumerate(self.reference_face.component_construction.layers):
+
+
+
+        assembly
 
 
 

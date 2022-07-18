@@ -21,8 +21,11 @@ class Material(object, metaclass=ABCMeta):
 
     def __init__(self, *args, **kwargs):
 
+        self._cell_zone = None
+
         self.id = kwargs.get('id', uuid.uuid4())
         self.name = kwargs.get('name', None)
+        self.cell_zone = kwargs.get('cell_zone', None)
 
         self.density = kwargs.get('density', 1000)                                      # kg / m^3
         self.specific_heat_capacity = kwargs.get('specific_heat_capacity', 1000)        # J / kg K
@@ -61,6 +64,16 @@ class Material(object, metaclass=ABCMeta):
         if self._thermo_physical_properties_entry is None:
             self._thermo_physical_properties_entry = self.generate_thermo_physical_properties_entry()
         return self._thermo_physical_properties_entry
+
+    @property
+    def cell_zone(self):
+        if self._cell_zone is None:
+            self._cell_zone = self.create_cell_zone()
+        return self._cell_zone
+
+    @cell_zone.setter
+    def cell_zone(self, value):
+        self._cell_zone = value
 
     @property
     def decompose_par_dict(self):
@@ -109,6 +122,10 @@ class Material(object, metaclass=ABCMeta):
         full_filename = os.path.join(case_dir, 'system', str(self.txt_id), 'fvSolution')
         with open(full_filename, "w") as f:
             f.write(self.fvsolution)
+
+    def create_cell_zone(self):
+        from .meshing.block_mesh import CellZone
+        return CellZone(material=self)
 
 
 class Solid(Material):

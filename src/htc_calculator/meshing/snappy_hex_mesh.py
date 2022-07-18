@@ -253,6 +253,8 @@ class SnappyHexMesh(object):
 
         self.strict_region_snap = False
 
+        self.cell_zones = kwargs.get('cell_zones', [])
+
     # -----------------------------------------
     # property setup for attributes
     # -----------------------------------------

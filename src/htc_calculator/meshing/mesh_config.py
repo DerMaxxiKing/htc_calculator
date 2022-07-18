@@ -33,4 +33,4 @@ multi_region_feature_snap = False           # Detect features between multiple s
 # ----------------------------------------------------------------------------------------------------------------------
 
 feature_edges_level = 0                     # level of refinement of feature
-pipe_section_default_cell_size = 50         # Default cell size for pipe sections
+pipe_section_default_cell_size = 25         # Default cell size for pipe sections

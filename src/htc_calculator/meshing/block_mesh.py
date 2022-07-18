@@ -4030,6 +4030,10 @@ class BlockMesh(object):
             return
         self._case_dir = value
 
+    @property
+    def cell_zones(self):
+        return self.mesh.cell_zones
+
     def add_mesh_copy(self, other_block_mesh, copy_feature_faces=True):
 
         logger.info(f'Adding mesh copy of {other_block_mesh.name} to {self.name}')

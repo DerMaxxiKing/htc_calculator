@@ -72,6 +72,7 @@ class Solid(object):
         self.mesh_tool = kwargs.get('mesh_tool', 'snappyHexMesh')     # Mesh tool: 'snappyHexMesh' or 'blockMesh'
 
         self.material = kwargs.get('material', None)
+        self._cell_zones = kwargs.get('cell_zones', None)
 
     @property
     def case_dir(self):
@@ -95,6 +96,13 @@ class Solid(object):
     @mesh.setter
     def mesh(self, value):
         self._mesh = value
+
+    @property
+    def cell_zones(self):
+        if self._cell_zones is None:
+            if self.mesh is not None:
+                self._cell_zones = self.mesh.cell_zones
+        return self._cell_zones
 
     @property
     def obb(self):
@@ -474,6 +482,8 @@ class Solid(object):
         # shm.run_surface_feature_extract(case_dir=self.case_dir)
         # shm.write_snappy_hex_mesh(case_dir=self.case_dir)
         # shm.run(case_dir=self.case_dir, parallel=parallel)
+
+        shm.cell_zones = self.base_block_mesh.mesh.cell_zones
 
         return shm
 

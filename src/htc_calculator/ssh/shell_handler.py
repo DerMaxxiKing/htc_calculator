@@ -239,9 +239,9 @@ class ShellHandler:
 
     def run_split_mesh_regions(self, workdir, options=None):
         if options is None:
-            cmd = 'splitMeshRegions -cellZonesOnly -noFunctionObjects'
+            cmd = 'splitMeshRegions -cellZonesOnly -noFunctionObjects -overwrite  2>&1 | tee splitMeshRegions.log'
         else:
-            cmd = 'splitMeshRegions -cellZonesOnly -noFunctionObjects ' + options
+            cmd = 'splitMeshRegions -cellZonesOnly -noFunctionObjects -overwrite ' + options + ' 2>&1 | tee splitMeshRegions.log'
         shin, shout, sherr = self.execute(cmd, cwd=workdir)
         if sherr:
             logger.error(f"Error running splitMeshRegions: \n {''.join(sherr)}")
