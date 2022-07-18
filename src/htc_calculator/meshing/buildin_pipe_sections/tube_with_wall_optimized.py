@@ -1,6 +1,7 @@
 from ...logger import logger
 from ..block_mesh import BlockMeshVertex, BlockMeshEdge, unit_vector, CellZone
 from ..pipe_sections import PipeSection
+from ..mesh_config import pipe_section_default_cell_size
 from ...buildin_materials import water
 import numpy as np
 
@@ -144,7 +145,7 @@ outer_edge_indices = [[8, 12, 16, 13],       # Block 5
 n_cell = [5, 5, None]
 
 # size of cells in mm; if None n_cell must be defined
-cell_size = [None, None, 100]
+cell_size = [None, None, pipe_section_default_cell_size]
 
 inner_cell_zone = CellZone(new=True)
 outer_cell_zone = CellZone(new=True)

@@ -419,24 +419,23 @@ class OFCase(object):
 
         return combined_mesh
 
-    def merge_mesh(self, mesh, case_dir=None, other_case_dir=None, overwrite=True, add_ami=True):
+    def merge_mesh(self, case_dir=None, other_case_dir=None, overwrite=True, add_ami=True):
 
         if case_dir is None:
             case_dir = self.case_dir
-
-        if other_case_dir is None:
-            other_case_dir = mesh.case_dir
 
         if overwrite:
             overwrite_txt = ' -overwrite'
         else:
             overwrite_txt = ''
 
-        logger.info(f'Merging meshes {self} and {mesh}')
+        logger.info(f'Merging meshes:\n'
+                    f'Source: {other_case_dir}\n'
+                    f'Target {case_dir}\n')
 
         if use_ssh:
-            shell_handler.run_merge_meshes(case_dir,
-                                           parallel=True,
+            shell_handler.run_merge_meshes(case_dir, other_case_dir,
+                                           parallel=False,
                                            options=' -noFunctionObjects',
                                            overwrite=overwrite)
         else:
@@ -451,23 +450,23 @@ class OFCase(object):
             else:
                 logger.error(f"Error Merging meshes:\n{res.stderr.decode('ascii')}")
 
-        if add_ami:
-            amis = []
-
-            for name, boundary in mesh.mesh.boundaries.items():
-                if not isinstance(boundary, CyclicAMI):
-                    continue
-            if boundary.neighbour_patch in self.mesh.boundaries.values():
-                amis.extend([boundary, boundary.neighbour_patch])
-
-            cpd = CreatePatchDict(case_dir=case_dir,
-                                  boundaries=amis)
-            cpd.write_create_patch_dict()
-            cpd.run(case_dir=self.case_dir)
-
-            return cpd
-        else:
-            return True
+        # if add_ami:
+        #     amis = []
+        #
+        #     for name, boundary in mesh.mesh.boundaries.items():
+        #         if not isinstance(boundary, CyclicAMI):
+        #             continue
+        #     if boundary.neighbour_patch in self.mesh.boundaries.values():
+        #         amis.extend([boundary, boundary.neighbour_patch])
+        #
+        #     cpd = CreatePatchDict(case_dir=case_dir,
+        #                           boundaries=amis)
+        #     cpd.write_create_patch_dict()
+        #     cpd.run(case_dir=self.case_dir)
+        #
+        #     return cpd
+        # else:
+        #     return True
 
     def run(self):
 
@@ -771,22 +770,20 @@ class OFCase(object):
             solid.run_meshing(split_mesh_regions=False)
             solid.run_check_mesh()
             if i == 0:
-                shell_handler.copy_mesh(self.case_dir, solid.mesh.case_dir)
+                shell_handler.copy_mesh(solid.case_dir, self.case_dir)
             else:
-                self.merge_mesh(solid.mesh)
+                self.merge_mesh(case_dir=self.case_dir,
+                                other_case_dir=solid.case_dir)
 
-        cut_pipe_layer_solid = self.reference_face.cut_pipe_layer_solid
-        os.makedirs(f'{work_dir}/{cut_pipe_layer_solid.txt_id}', exist_ok=True)
-        cut_pipe_layer_solid.save_fcstd(f'{work_dir}/{cut_pipe_layer_solid.txt_id}/{cut_pipe_layer_solid.txt_id}.FCStd')
+        logger.info(f'Successfully created and merged meshes')
 
-        cut_pipe_layer_solid.features['pipe_mesh_interfaces'].surface_mesh_setup.max_refinement_level = 4
-        cut_pipe_layer_solid.features['pipe_mesh_interfaces'].surface_mesh_setup.min_refinement_level = 4
+        logger.info(f'Splitting mesh regions')
+        shell_handler.run_split_mesh_regions(workdir=self.case_dir)
+        logger.info(f'Splitting mesh regions')
 
-        cut_pipe_layer_solid.create_shm_mesh(normal=self.reference_face.normal,
-                                             parallel=False,
-                                             block_mesh_size=100,
-                                             feature_edges_level=0,
-                                             refine_normal_direction=False)
+
+
+
 
 
 def execute(command, cwd):

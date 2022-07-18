@@ -9,7 +9,7 @@ max_local_cells = int(2e+7)                 # max number of cellsMaximum number 
 max_global_cells = int(3e+7)                # Overall cell limit during refinement (i.e. before removal)
 min_refinement_cells = 0                    # If ≥ number of cells to be refined, surface refinement stops
 max_load_unbalance = 0.2                    # Maximum processor imbalance during refinement where a value of 0 represents a perfect balance
-n_cells_between_levels = 1                  # Number of buffer layers of cells between different levels of refinement
+n_cells_between_levels = 2                  # Number of buffer layers of cells between different levels of refinement
 resolve_feature_angle = 30                  # Applies maximum level of refinement to cells that can see intersections whose angle exceeds this
 allow_free_standing_zone_faces = False      # Allow the generation of free-standing zone faces
 
@@ -25,7 +25,7 @@ n_relax_iter = 5                            # Maximum number of snapping relaxat
 n_feature_snap_iter = 10                    # Number of feature edge snapping iterations
 implicit_feature_snap = False               # Detect (geometric only) features by sampling the surface
 explicit_feature_snap = True                # Use castellatedMeshControls features
-multi_region_feature_snap = False              # Detect features between multiple surfaces when using the explicitFeatureSnap
+multi_region_feature_snap = False           # Detect features between multiple surfaces when using the explicitFeatureSnap
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -33,3 +33,4 @@ multi_region_feature_snap = False              # Detect features between multipl
 # ----------------------------------------------------------------------------------------------------------------------
 
 feature_edges_level = 0                     # level of refinement of feature
+pipe_section_default_cell_size = 50         # Default cell size for pipe sections

@@ -6,6 +6,7 @@ from multiprocessing import cpu_count
 from math import floor
 from shutil import copyfile
 from time import sleep
+import csv
 
 from ..config import ssh_pwd, ssh_user, host
 
@@ -34,6 +35,14 @@ class ShellHandler:
         channel = self.ssh.invoke_shell()
         self.stdin = channel.makefile('wb')
         self.stdout = channel.makefile('r')
+
+        self._num_worker = None
+
+    @property
+    def num_worker(self):
+        if self._num_worker is None:
+            self._num_worker = self.get_num_worker()
+        return self._num_worker
 
     def __del__(self):
         self.ssh.close()
@@ -115,6 +124,13 @@ class ShellHandler:
 
         return shin, shout, sherr
 
+    def get_num_worker(self):
+
+        shin, shout, sherr = self.execute('lscpu')
+        values = {x[0]: x[1] for x in list(csv.reader(shout, delimiter=':')) if x.__len__() == 2}
+
+        return int(values['CPU(s)'])
+
     def run_surface_feature_extract(self, workdir):
         shin, shout, sherr = self.execute(f'surfaceFeatureExtract 2>&1 | tee surfaceFeatureExtract.log', cwd=workdir)
         if sherr:
@@ -136,7 +152,7 @@ class ShellHandler:
         if parallel:
             cmd += ' -parallel'
             if num_worker is None:
-                num_worker = floor(cpu_count() / 2 + 1)
+                num_worker = int(self.num_worker / 2)
 
             _ = self.execute(f'export OMPI_ALLOW_RUN_AS_ROOT=1')
             _ = self.execute(f'export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1')
@@ -223,9 +239,9 @@ class ShellHandler:
 
     def run_split_mesh_regions(self, workdir, options=None):
         if options is None:
-            cmd = 'splitMeshRegions'
+            cmd = 'splitMeshRegions -cellZonesOnly -noFunctionObjects'
         else:
-            cmd = 'splitMeshRegions ' + options
+            cmd = 'splitMeshRegions -cellZonesOnly -noFunctionObjects ' + options
         shin, shout, sherr = self.execute(cmd, cwd=workdir)
         if sherr:
             logger.error(f"Error running splitMeshRegions: \n {''.join(sherr)}")
@@ -242,9 +258,9 @@ class ShellHandler:
 
         return shin, shout, sherr
 
-    def run_merge_meshes(self, workdir, options=None, parallel=True, overwrite=True):
+    def run_merge_meshes(self, workdir, other_case_dir, options=None, parallel=False, overwrite=True, num_worker=None):
 
-        cmd = 'mergeMeshes'
+        cmd = f'mergeMeshes -case {workdir}'
 
         if options is not None:
             cmd = cmd + options
@@ -252,8 +268,26 @@ class ShellHandler:
         if parallel:
             cmd = cmd + ' -parallel'
 
+            if num_worker is None:
+                num_worker = self.num_worker
+
+            _ = self.execute(f'export OMPI_ALLOW_RUN_AS_ROOT=1')
+            _ = self.execute(f'export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1')
+
+            template = pkg_resources.read_text(msh_resources, 'decompose_par_dict')
+            s = template.replace('<n_procs>', str(int(num_worker / 2)))
+            dec_target = os.path.join(workdir, 'system', 'decomposeParDict')
+            with open(dec_target, 'w') as sfed:
+                sfed.write(s)
+
+            cmd = f'mpirun -np {int(self.num_worker/2)} ' + cmd + f' -decomposeParDict {dec_target}'
+
+            shin, shout, sherr = self.execute('decomposePar', cwd=workdir)
+
         if overwrite:
             cmd = cmd + ' -overwrite'
+
+        cmd = cmd + f' {workdir} {other_case_dir}'
 
         shin, shout, sherr = self.execute(cmd, cwd=workdir)
         if sherr:
@@ -271,9 +305,51 @@ class ShellHandler:
 
     def copy_mesh(self, source, destination, time=None):
 
+        if time is None:
+            time = get_latest_timestep(source)
+
+        destination_dir = os.path.join(destination, 'constant')
+        if float(time) == 0:
+            source_dir = os.path.join(source, 'constant', 'polyMesh')
+        else:
+            source_dir = os.path.join(source, time, 'constant', 'polyMesh')
+
+        cmd = f'cp -r {source_dir} {destination_dir}'
+        shin, shout, sherr = self.execute(cmd)
+
+        if sherr:
+            logger.error(f"Error running {cmd}: \n {''.join(sherr)}")
+            raise Exception(f"Error running {cmd}:  \n {''.join(sherr)}")
+        else:
+            output = ''.join(shout)
+            logger.info(f"Successfully ran {cmd}:\n"
+                        f"{output}")
+
         return True
 
 
-
-
 sh = ShellHandler(host, ssh_user, ssh_pwd)
+
+
+def get_latest_timestep(directory):
+    latest_ts = None
+
+    shin, shout, sherr = sh.execute('ls -a', cwd=directory)
+
+    directories = '\n'.join(shout).split()
+
+    for directory in directories:
+
+        try:
+            ts = float(directory)
+            _, __, err = sh.execute(f'[ -d {directory} ]', cwd=directory)
+            if err:
+                continue
+
+            if latest_ts is None:
+                latest_ts = directory
+            elif ts > float(latest_ts):
+                latest_ts = directory
+        except ValueError:
+            continue
+    return latest_ts
