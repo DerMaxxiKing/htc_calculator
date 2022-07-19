@@ -74,6 +74,9 @@ class Solid(object):
         self.material = kwargs.get('material', None)
         self._cell_zones = kwargs.get('cell_zones', None)
 
+        self.base_block_mesh_ok = False
+        self.mesh_ok = False
+
     @property
     def case_dir(self):
         if self._case_dir is None:
@@ -172,8 +175,12 @@ class Solid(object):
                         f'  Base mesh missing.'
                         f'  Creating base mesh in {self.case_dir}')
             self._base_block_mesh = self.create_base_block_mesh(self.case_dir)
-            logger.info(f'Successfully created base mesh for {self.name} {self.txt_id}')
+            logger.info(f'Successfully created base block mesh for {self.name} {self.txt_id}')
         return self._base_block_mesh
+
+    @base_block_mesh.setter
+    def base_block_mesh(self, value):
+        self._base_block_mesh = value
 
     @staticmethod
     def update_face(face, new_face):
@@ -253,6 +260,8 @@ class Solid(object):
         # logger.debug(f'generating solid from faces: {self.id}')
         # start_time = time.time()
 
+        logger.info(f'Generating solid from faces: {self.name} {self.id}')
+
         faces = []
         [faces.extend(x.fc_face.Faces) for x in self.faces]
         shell = FCPart.makeShell(faces)
@@ -272,21 +281,32 @@ class Solid(object):
 
         self.fc_solid = __o__
 
-        # logger.debug(f'    finished generation of solid from faces: {self.id} in {time.time() - start_time} s')
+        logger.debug(f'Successfully finished generation of solid from faces: {self.id}')
 
         return self.fc_solid
 
     def generate_faces_from_solid(self, solid):
         pass
 
-    def write_of_geo(self, directory, separate_interface=True):
+    def write_of_geo(self, directory, separate_interface=True, write_internal_interfaces=False):
 
         logger.info(f'Writing OF geometry for solid: {self.txt_id} to {directory}')
 
+        faces = set(self.faces)
+
         if separate_interface:
-            stl_str = ''.join([x.create_stl_str(of=True) for x in set(self.faces) - set(self.interfaces)])
-        else:
-            stl_str = ''.join([x.create_stl_str(of=True) for x in set(self.faces)])
+            faces = faces - set(self.interfaces)
+
+        if not write_internal_interfaces:
+            if 'internal_interfaces' in self.features.keys():
+                faces = faces - set(self.features['internal_interfaces'])
+
+        stl_str = ''.join([x.create_stl_str(of=True) for x in faces])
+
+        # if separate_interface:
+        #     stl_str = ''.join([x.create_stl_str(of=True) for x in set(self.faces) - set(self.interfaces)])
+        # else:
+        #     stl_str = ''.join([x.create_stl_str(of=True) for x in set(self.faces)])
 
         os.makedirs(directory, exist_ok=True)
         new_file = open(os.path.join(directory, str(self.txt_id) + '.stl'), 'w')
@@ -304,12 +324,16 @@ class Solid(object):
         logger.info(f'Successfully written OF geometry for solid: {self.txt_id} to {directory}')
 
     @property
-    def shm_geo_entry(self, offset=0):
+    def shm_geo_entry(self, offset=0, write_internal_interfaces=False):
 
         local_offset = 4
         offset = offset + local_offset
 
-        solid_faces = self.faces
+        solid_faces = set(self.faces)
+
+        if not write_internal_interfaces:
+            if 'internal_interfaces' in self.features.keys():
+                solid_faces = solid_faces - set(self.features['internal_interfaces'])
 
         buf = StringIO()
 
@@ -444,6 +468,8 @@ class Solid(object):
                         feature_edges_level=0,
                         refine_normal_direction=True):
 
+        logger.info(f'creating snappyHexMesh for {self.name} {self.id}')
+
         from .meshing.snappy_hex_mesh import SnappyHexMesh
 
         if directory is not None:
@@ -477,13 +503,16 @@ class Solid(object):
         shm = SnappyHexMesh(name='SHM ' + self.name,
                             assembly=self,
                             allow_free_standing_zone_faces=False,
-                            feature_edges_level=feature_edges_level)
+                            feature_edges_level=feature_edges_level,
+                            case_dir=self.case_dir)
         # shm.create_surface_feature_extract_dict(case_dir=self.case_dir)
         # shm.run_surface_feature_extract(case_dir=self.case_dir)
         # shm.write_snappy_hex_mesh(case_dir=self.case_dir)
         # shm.run(case_dir=self.case_dir, parallel=parallel)
 
         shm.cell_zones = self.base_block_mesh.mesh.cell_zones
+
+        logger.info(f'Successfully created snappyHexMesh for {self.name} {self.id}')
 
         return shm
 
@@ -559,12 +588,33 @@ class Solid(object):
 
         new_block.num_cells = num_cells
 
-        os.makedirs(self.case_dir, exist_ok=True)
-        block_mesh.init_case()
-        block_mesh.run_block_mesh(run_parafoam=True)
-        logger.info(f'Successfully created block mesh for solid: {self.txt_id}')
+        # self.run_base_block_mesh(base_block_mesh=block_mesh,
+        #                          case_dir=self.case_dir)
 
         return block_mesh
+
+    def run_base_block_mesh(self,
+                            base_block_mesh=None,
+                            case_dir=None):
+
+        logger.info(f'Running blockMesh for base mesh of {self.name} {self.id}')
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        if base_block_mesh is None:
+            base_block_mesh = self.base_block_mesh
+
+        os.makedirs(case_dir, exist_ok=True)
+        base_block_mesh.init_case()
+        base_block_mesh.run_block_mesh(run_parafoam=True)
+        logger.info(f'Successfully created base block mesh for solid: {self.txt_id} in {case_dir}')
+
+        logger.info(f'Checking base mesh')
+        base_block_mesh.run_check_mesh(case_dir=case_dir)
+
+        self.base_block_mesh_ok = True
+        return base_block_mesh
 
     def common(self, other):
         """
@@ -589,6 +639,8 @@ class Solid(object):
             raise Exception(f'No mesh found for solid {self.name}, {self.txt_id}')
 
         if isinstance(self.mesh, SnappyHexMesh):
+            if not self.base_block_mesh_ok:
+                self.run_base_block_mesh()
             self.mesh.create_surface_feature_extract_dict(case_dir=self.case_dir)
             self.mesh.run_surface_feature_extract(case_dir=self.case_dir)
             self.mesh.write_snappy_hex_mesh(case_dir=self.case_dir)
@@ -600,19 +652,35 @@ class Solid(object):
             self.mesh.run_block_mesh(case_dir=self.case_dir)
             if split_mesh_regions:
                 self.mesh.run_split_mesh_regions(case_dir=self.case_dir)
-            self.mesh.run_check_mesh(case_dir=self.case_dir)
-            self.mesh.run_parafoam(case_dir=self.case_dir)
+            # self.mesh.run_check_mesh(case_dir=self.case_dir)
+            # self.mesh.run_parafoam(case_dir=self.case_dir)
 
         et_time = time.time()
         logger.info(f'Successfully ran meshing for solid {self.name} in {self.case_dir}\n'
                     f'Mesh creation took {et_time - st_time} seconds')
 
-    def run_check_mesh(self):
+        logger.info(f"Checking mesh for {self.name}, in {self.case_dir}")
         self.mesh.run_check_mesh(case_dir=self.case_dir)
+        logger.info(f'Successfully checked mesh for solid {self.name} in {self.case_dir}')
+
+        self.mesh.run_parafoam(case_dir=self.case_dir)
+
+        self.mesh_ok = True
+
+    def run_check_mesh(self):
+        logger.info(f'Checking mesh for {self.name} in {self.case_dir}')
+        self.mesh.run_check_mesh(case_dir=self.case_dir)
+        logger.info(f'Successfully checked mesh for {self.name} in {self.case_dir}')
 
     def __repr__(self):
         rep = f'Solid {self.name} {self.id} {self.Volume}'
         return rep
+
+
+class MultiMaterialSolid(Solid):
+
+    def __init__(self, *args, **kwargs):
+        Solid.__init__(self, *args, **kwargs)
 
 
 class PipeSolid(Solid):

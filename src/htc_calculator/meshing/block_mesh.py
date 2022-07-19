@@ -1630,6 +1630,7 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         self._txt_id = None
         self._alt_txt_id = None
         self._function_objects = None
+        self._fc_face = None
 
         self.id = next(BlockMeshBoundary.id_iter)
         self.alt_id = next(BlockMeshBoundary.id_iter)       # alternative id, needed in changePatchDict as existing patch type will remain the same
@@ -1676,9 +1677,9 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
     def txt_id(self):
         if self._txt_id is None:
             if isinstance(self.id, uuid.UUID):
-                self._txt_id = 'bc' + str(self.id.hex)
+                self._txt_id = re.sub('\W+','', 'a' + str(self.id))
             else:
-                self._txt_id = 'bc' + str(self.id)
+                self._txt_id = re.sub('\W+','', 'a' + str(self.id))
         return self._txt_id
 
     @txt_id.setter
@@ -1754,8 +1755,20 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
             fo.patches.add(self)
             fo.cell_zone = self.cell_zone
 
+    @property
+    def fc_face(self):
+        raise NotImplementedError
+
     def __repr__(self):
         return f'Boundary {self.id} (name={self.name}, type={self.type}, faces={self.faces})'
+
+    def __eq__(self, other):
+        if not isinstance(other, BlockMeshBoundary):
+            return False
+        return self.id == other.id
+
+    def __hash__(self):
+        return id(self)
 
 
 class CyclicAMI(BlockMeshBoundary):
@@ -4019,9 +4032,13 @@ class BlockMesh(object):
         self._name = value
 
     @property
+    def txt_id(self):
+        return re.sub('\W+', '', 'a' + str(self.id))
+
+    @property
     def case_dir(self):
         if self._case_dir is None:
-            self._case_dir = os.path.join(self.default_path, 'case_' + str(self.id.hex))
+            self._case_dir = os.path.join(os.path.join(self.default_path, self.txt_id))
         return self._case_dir
 
     @case_dir.setter
@@ -4276,16 +4293,19 @@ class BlockMesh(object):
         if case_dir is None:
             case_dir = self.case_dir
 
-        logger.info(f'Running paraFoam initialization....')
-        res = subprocess.run(["/bin/bash", "-i", "-c", "paraFoam -touchAll"],
-                             capture_output=True,
-                             cwd=case_dir,
-                             user='root')
-        if res.returncode == 0:
-            output = res.stdout.decode('ascii')
-            logger.info(f"Successfully ran paraFoam initialization \n\n{output}")
+        if use_ssh:
+            shin, shout, sherr = shell_handler.run_parafoam(case_dir)
         else:
-            logger.error(f"{res.stderr.decode('ascii')}")
+            logger.info(f'Running paraFoam initialization....')
+            res = subprocess.run(["/bin/bash", "-i", "-c", "paraFoam -touchAll"],
+                                 capture_output=True,
+                                 cwd=case_dir,
+                                 user='root')
+            if res.returncode == 0:
+                output = res.stdout.decode('ascii')
+                logger.info(f"Successfully ran paraFoam initialization \n\n{output}")
+            else:
+                logger.error(f"{res.stderr.decode('ascii')}")
         return True
 
     def merge_mesh(self, block_mesh, case_dir=None, other_case_dir=None, overwrite=True, add_ami=True):
@@ -4442,32 +4462,49 @@ class BlockMesh(object):
                 raise Exception(f"Error creating block Mesh:\n{res.stderr.decode('ascii')}")
         return True
 
-    def create_mesh_solid(self, name=None, mesh_tool='snappyHexMesh'):
+    def create_mesh_solid(self, name=None, mesh_tool='snappyHexMesh', case_dir=None):
+
+        logger.info(f"Creating mesh solid")
+
+        if case_dir is None:
+            case_dir = self.case_dir
 
         from ..solid import Solid as SolidVolume
+        from ..solid import MultiMaterialSolid as MultiMaterialSolidVolume
+
+        if self.cell_zones.__len__() <= 1:
+            vol_cls = SolidVolume
+        elif self.cell_zones.__len__() > 1:
+            vol_cls = MultiMaterialSolidVolume
 
         if name is None:
             name = self.name
 
-        mesh_solid = SolidVolume(name=name,
-                                 mesh_tool=mesh_tool,
-                                 id=self.id,
-                                 )
+        mesh_solid = vol_cls(name=name,
+                             mesh_tool=mesh_tool,
+                             id=self.id,
+                             case_dir=case_dir)
         mesh_solid.mesh = self
         mesh_solid.mesh.case_dir = mesh_solid.case_dir
         mesh_solid._faces = []
 
-        assigned_faces = set([*self.bottom_faces, *self.top_faces, *self.interfaces])
+        assigned_faces = {*self.bottom_faces, *self.top_faces, *self.interfaces}
+
+        logger.info(f"Creating boundary faces")
 
         for boundary in self.mesh.boundaries.values():
             # Todo: add interfaces
             assigned_faces.update(boundary.faces)
-            face = Face(fc_face=FCPart.makeShell([x.fc_face for x in boundary.faces]),
-                        id=boundary.txt_id)
+            face = Face(name='face_' + boundary.name,
+                        fc_face=FCPart.makeShell([x.fc_face for x in boundary.faces]),
+                        block_mesh_faces=boundary.faces,
+                        boundary_condition=boundary)
             mesh_solid._faces.append(face)
             mesh_solid.features[boundary.name] = face
 
         wall_patches = []
+
+        logger.info(f"Creating interfaces")
 
         interfaces_dict = {i: [] for i in list(itertools.combinations(self.mesh.cell_zones, 2))}
 
@@ -4484,22 +4521,33 @@ class BlockMesh(object):
                                 (list(face.blocks)[1].cell_zone in i_interface):
                             i_faces.append(face)
 
-        face = Face(fc_face=FCPart.makeShell([x.fc_face for x in wall_patches]),
-                    id=wall_patch.txt_id)
+        local_wall_patch = BlockMeshBoundary.copy_to_mesh(wall_patch, self.mesh)
+        face = Face(name='Wall Face',
+                    fc_face=FCPart.makeShell([x.fc_face for x in wall_patches]),
+                    block_mesh_faces=wall_patches,
+                    boundary_condition=local_wall_patch)
         mesh_solid._faces.append(face)
         mesh_solid.features['walls'] = face
 
+        internal_interfaces = []
         for interface, i_faces in interfaces_dict.items():
             if i_faces:
                 face = Face(fc_face=FCPart.makeShell([x.fc_face for x in i_faces]),
                             name=f'{interface[0].txt_id}_to_{interface[1].txt_id}')
                 mesh_solid._faces.append(face)
                 mesh_solid.features[f'{interface[0].txt_id}_to_{interface[1].txt_id}'] = face
+                internal_interfaces.append(face)
+
+        mesh_solid.features['internal_interfaces'] = internal_interfaces
 
         # add interfaces
         face = Face(fc_face=FCPart.makeShell([x.fc_face for x in [*self.bottom_faces,
                                                                   *self.top_faces,
-                                                                  *self.interfaces]]))
+                                                                  *self.interfaces]]),
+                    block_mesh_faces=[*self.bottom_faces,
+                                      *self.top_faces,
+                                      *self.interfaces],
+                    boundary_condition=None)
 
         mesh_solid._faces.append(face)
         mesh_solid.features['interfaces'] = face
@@ -4509,6 +4557,29 @@ class BlockMesh(object):
         mesh_solid.generate_solid_from_faces()
 
         return mesh_solid
+
+    def create_shm_mesh_solid(self, name=None, mesh_tool='snappyHexMesh'):
+
+        logger.info(f"Creating snappyHexMesh solid from Block Mesh")
+
+        solid = self.create_mesh_solid(name=name, mesh_tool=mesh_tool)
+        solid.base_block_mesh = self
+        solid.mesh = None
+
+        # for face in solid.faces:
+        #     face.export_stl(f'/simulations/{face.name}.stl')
+
+        geo_dir = os.path.join(solid.case_dir, 'constant', 'triSurface')
+        os.makedirs(solid.case_dir, exist_ok=True)
+
+        solid.write_of_geo(geo_dir, separate_interface=False)
+
+        # do not do mesh refinement
+        solid.mesh.castellated_mesh = False
+
+        logger.info(f"Successfully created snappyHexMesh solid from Block Mesh")
+
+        return solid
 
     def __repr__(self):
         return f'BlockMesh {self.id} ({self.name}, ' \

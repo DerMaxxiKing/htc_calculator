@@ -9,7 +9,7 @@ import functools
 from .reference_face import ReferenceFace
 from .tools import project_point_on_line, export_objects
 from .face import Face
-from .solid import Solid, PipeSolid
+from .solid import Solid, PipeSolid, MultiMaterialSolid
 from .assembly import Assembly
 from .meshing import block_mesh as imp_block_mesh
 from .meshing.block_mesh import create_blocks_from_2d_mesh, Mesh, BlockMesh, \
@@ -948,7 +948,8 @@ class ActivatedReferenceFace(ReferenceFace):
         self.pipe_layer.solid = cutted_solid
 
         self.update_cell_zone(blocks=self.pipe_mesh.mesh.blocks, mesh=self.pipe_mesh.mesh)
-        mesh_solid = self.pipe_mesh.create_mesh_solid()
+        # mesh_solid = self.pipe_mesh.create_mesh_solid()
+        mesh_solid = self.pipe_mesh.create_shm_mesh_solid()
 
         solids = [*[x.solid for x in self.component_construction.layers], mesh_solid]
 

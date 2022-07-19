@@ -25,9 +25,10 @@ class Face(object):
 
     def __init__(self, *args, **kwargs):
 
+        self._boundary_condition = None
+
         self.id = kwargs.get('id', uuid.uuid4())
         # logger.debug(f'initializing face {self.id}')
-        start_time = time.time()
 
         self.name = kwargs.get('name', None)
         self._normal = kwargs.get('normal', None)
@@ -40,8 +41,24 @@ class Face(object):
                                               kwargs.get('surface_mesh_setup',
                                                          deepcopy(default_surface_mesh_parameter)))
 
-        self.linear_deflection = kwargs.get('linear_deflection', 0.5)
-        self.angular_deflection = kwargs.get('angular_deflection', 0.5)
+        self.linear_deflection = kwargs.get('linear_deflection', 0.25)
+        self.angular_deflection = kwargs.get('angular_deflection', 0.25)
+
+        self.block_mesh_faces = kwargs.get('block_mesh_faces', [])
+        self.boundary_condition = kwargs.get('boundary_condition', None)
+
+    @property
+    def boundary_condition(self):
+        return self._boundary_condition
+
+    @boundary_condition.setter
+    def boundary_condition(self, value):
+        self._boundary_condition = value
+
+        if self.block_mesh_faces:
+            for block_mesh_face in self.block_mesh_faces:
+                if value != block_mesh_face.boundary:
+                    block_mesh_face.boundary = value
 
     @property
     def area(self):
@@ -336,7 +353,9 @@ class Face(object):
 
         return mesh
 
-
     def __repr__(self):
         rep = f'Face {self.name} {self.id} {self.area}'
         return rep
+
+    def __hash__(self):
+        return id(self)

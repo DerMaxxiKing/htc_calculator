@@ -71,10 +71,15 @@ class ShellHandler:
                     execute('cd folder_name')
         """
         if cwd is not None:
-            shin, shout, sherr = self.execute('pwd')
-            sleep(0.1)
-            pwd = shout[-1]
-            self.execute(f'cd {cwd}')
+            try:
+                shin, shout, sherr = self.execute('pwd')
+                sleep(0.1)
+                pwd = shout[-1]
+            except Exception as e:
+                pwd = None
+                logger.warning(f'Could not get pwd')
+            finally:
+                self.execute(f'cd {cwd}')
 
         cmd = cmd.strip('\n')
         # self.stdin.write("sudo su " + '\n')
@@ -117,7 +122,8 @@ class ShellHandler:
             sherr.pop(0)
 
         if cwd is not None:
-            self.execute(f'cd {pwd}')
+            if pwd is not None:
+                self.execute(f'cd {pwd}')
 
         if sherr:
             logger.error(f'Error executing command: {cmd}:\n' + ''.join(sherr))
@@ -169,23 +175,23 @@ class ShellHandler:
             shin, shout, sherr = self.execute(f'chmod +x {run_shm_dest}')
             shin, shout, sherr = self.execute(f'./runSHM', cwd=workdir)
 
-            shin, shout, sherr = self.execute(f'paraFoam -touchAll', cwd=workdir)
-
         else:
             shin, shout, sherr = self.execute(cmd, cwd=workdir)
-            if sherr:
-                logger.error(f"Error running snappyHexMesh: \n {''.join(sherr)}")
-                raise Exception(f"Error running snappyHexMesh:  \n {''.join(sherr)}")
-            else:
-                output = ''.join(shout)
-                if output.find('FOAM FATAL ERROR') != -1:
-                    logger.error(f'Error running snappyHexMesh:\n\n{output}')
-                    raise Exception(f"Error running snappyHexMesh:  \n {''.join(sherr)}")
-                logger.info(f"Successfully created snappyHexMesh:\n"
-                            f"Directory: {workdir}\n\n "
-                            f"{output[output.find('Mesh Information'):output.find('End')]}")
 
-            return shin, shout, sherr
+        if sherr:
+            logger.error(f"Error running splitMeshRegions: \n {''.join(sherr)}")
+            raise Exception(f"Error running splitMeshRegions:  \n {''.join(sherr)}")
+
+        # read log:
+        with open(os.path.join(workdir, 'log.snappyHexMesh')) as f:
+            content = f.read()
+        if 'FOAM FATAL ERROR' in content:
+            logger.error(f'Error running snappyHexMesh:\n\n{content}')
+            raise Exception(f"Error running snappyHexMesh:  \n {''.join(content)}")
+
+        self.run_parafoam(workdir=workdir)
+
+        return shin, shout, sherr
 
     def run_check_mesh(self, workdir, options=None):
         if options is None:
@@ -303,13 +309,20 @@ class ShellHandler:
                         f"{output}")
         self.execute(f'paraFoam -touchAll', cwd=workdir)
 
+    def run_parafoam(self, workdir):
+        shin, shout, sherr = self.execute(f'paraFoam -touchAll', cwd=workdir)
+
     def copy_mesh(self, source, destination, time=None):
+
+        logger.info(f'Copying mesh from {source} to {destination}')
 
         if time is None:
             time = get_latest_timestep(source)
 
         destination_dir = os.path.join(destination, 'constant')
-        if float(time) == 0:
+        if time is None:
+            source_dir = os.path.join(source, 'constant', 'polyMesh')
+        elif float(time) == 0:
             source_dir = os.path.join(source, 'constant', 'polyMesh')
         else:
             source_dir = os.path.join(source, time, 'constant', 'polyMesh')
@@ -324,6 +337,8 @@ class ShellHandler:
             output = ''.join(shout)
             logger.info(f"Successfully ran {cmd}:\n"
                         f"{output}")
+
+        logger.info(f'Successfully copied mesh from {source} to {destination}')
 
         return True
 

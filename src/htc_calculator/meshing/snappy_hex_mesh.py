@@ -953,5 +953,18 @@ class SnappyHexMesh(object):
                 logger.error(f"{res.stderr.decode('ascii')}")
             raise NotImplementedError()
 
+    def run_parafoam(self, case_dir=None):
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        if case_dir is None:
+            logging.error(f'{self.name}: no case_dir')
+            return
+
+        if use_ssh:
+            shell_handler.run_parafoam(case_dir)
+        else:
+            raise NotImplementedError()
+
     def create_base_block_mesh(self):
         raise NotImplementedError()

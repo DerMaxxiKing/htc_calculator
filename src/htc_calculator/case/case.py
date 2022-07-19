@@ -17,6 +17,7 @@ from ..construction import write_region_properties, Fluid, Solid
 from .boundary_conditions.user_bcs import SolidFluidInterface, FluidSolidInterface
 from .. import config
 from .function_objects.function_object import FOMetaMock
+from ..solid import MultiMaterialSolid
 
 from .of_parser import CppDictParser
 
@@ -770,9 +771,18 @@ class OFCase(object):
 
         assembly = self.reference_face.assembly
 
+        assembly.solids[-1].run_meshing(split_mesh_regions=False)
+
         for i, solid in enumerate(assembly.solids):
+            print(f'{solid.name}')
             solid.run_meshing(split_mesh_regions=False)
-            solid.run_check_mesh()
+
+            if not solid.mesh_ok:
+                raise Exception(f'Mesh of{solid.name} is not ok')
+            # solid.run_check_mesh()
+            if isinstance(solid, MultiMaterialSolid):
+                shell_handler.run_split_mesh_regions(workdir=solid.case_dir)
+
             if i == 0:
                 shell_handler.copy_mesh(solid.case_dir, self.case_dir)
             else:
@@ -781,9 +791,9 @@ class OFCase(object):
 
         logger.info(f'Successfully created and merged meshes')
 
-        logger.info(f'Splitting mesh regions')
-        shell_handler.run_split_mesh_regions(workdir=self.case_dir)
-        logger.info(f'Successfully split mesh regions')
+        # logger.info(f'Splitting mesh regions')
+        # shell_handler.run_split_mesh_regions(workdir=self.case_dir)
+        # logger.info(f'Successfully split mesh regions')
 
         materials = set()
 
@@ -797,10 +807,13 @@ class OFCase(object):
 
         # write boundary conditions
         for i, layer in enumerate(self.reference_face.component_construction.layers):
+            logger.info(f'Writing boundary conditions for layer {layer}')
+            solid = layer.solid
+            if i == 0:
+                if 'base_faces' in layer.solid.features:
+                    print('done')
 
 
-
-        assembly
 
 
 
