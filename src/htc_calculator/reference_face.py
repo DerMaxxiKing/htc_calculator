@@ -6,6 +6,7 @@ from . import config as app_config
 from .face import Face
 from .solid import Solid
 from .assembly import Assembly
+from .case.boundary_conditions.face_bcs import solid_wall, interface
 from .tools import generate_solid_from_faces
 from .meshing.snappy_hex_mesh import SnappyHexMesh
 import time
@@ -19,6 +20,7 @@ from .logger import logger
 import FreeCAD
 import Part as FCPart
 from FreeCAD import Base
+from .case.boundary_conditions.face_bcs import SolidWall
 
 import ObjectsFem
 from femmesh.gmshtools import GmshTools as gt
@@ -241,6 +243,7 @@ class ReferenceFace(object):
                                                                False),
                                        name=f'Layer {i} {layer.name} side faces')
             faces.append(layer_side_faces[i])
+            layer_side_faces[i].boundary = solid_wall
 
             self.side_faces.append(layer_side_faces[i])
 

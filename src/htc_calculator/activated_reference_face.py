@@ -948,8 +948,8 @@ class ActivatedReferenceFace(ReferenceFace):
         self.pipe_layer.solid = cutted_solid
 
         self.update_cell_zone(blocks=self.pipe_mesh.mesh.blocks, mesh=self.pipe_mesh.mesh)
-        # mesh_solid = self.pipe_mesh.create_mesh_solid()
-        mesh_solid = self.pipe_mesh.create_shm_mesh_solid()
+        mesh_solid = self.pipe_mesh.create_mesh_solid()
+        # mesh_solid = self.pipe_mesh.create_shm_mesh_solid()
 
         solids = [*[x.solid for x in self.component_construction.layers], mesh_solid]
 

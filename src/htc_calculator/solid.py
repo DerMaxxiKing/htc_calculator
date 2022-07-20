@@ -46,6 +46,9 @@ class Solid(object):
 
         self._mesh = None
         self._case_dir = None
+        self._material = None
+        self._cell_zones = None
+        self._faces = None
 
         self.id = kwargs.get('id', uuid.uuid4())
         self.type = kwargs.get('type', None)
@@ -53,7 +56,7 @@ class Solid(object):
         self.name = kwargs.get('name', None)
         self.normal = kwargs.get('normal', None)
         self._fc_solid = kwargs.get('fc_solid', None)
-        self._faces = kwargs.get('faces', kwargs.get('_faces', None))
+        self.faces = kwargs.get('faces', kwargs.get('_faces', None))
         self.interfaces = kwargs.get('interfaces', [])
         self.features = kwargs.get('features', {})
         self.surface_mesh_setup = kwargs.get('_surface_mesh_setup',
@@ -72,7 +75,7 @@ class Solid(object):
         self.mesh_tool = kwargs.get('mesh_tool', 'snappyHexMesh')     # Mesh tool: 'snappyHexMesh' or 'blockMesh'
 
         self.material = kwargs.get('material', None)
-        self._cell_zones = kwargs.get('cell_zones', None)
+        self.cell_zones = kwargs.get('cell_zones', None)
 
         self.base_block_mesh_ok = False
         self.mesh_ok = False
@@ -107,6 +110,10 @@ class Solid(object):
                 self._cell_zones = self.mesh.cell_zones
         return self._cell_zones
 
+    @cell_zones.setter
+    def cell_zones(self, value):
+        self._cell_zones = value
+
     @property
     def obb(self):
         if self._obb is None:
@@ -136,6 +143,7 @@ class Solid(object):
         if self._faces is None:
             if self._fc_solid is not None:
                 self._faces = [Face(fc_face=x) for x in self._fc_solid.Shape.Faces]
+                [setattr(x, 'solid', self) for x in self._faces]
             else:
                 self._faces = []
         return self._faces
@@ -143,7 +151,9 @@ class Solid(object):
     @faces.setter
     def faces(self, value):
         self._faces = value
-        self.generate_solid_from_faces()
+        if self._faces is not None:
+            [setattr(x, 'solid', self) for x in self._faces]
+            self.generate_solid_from_faces()
 
     @property
     def fc_solid(self):
@@ -204,6 +214,20 @@ class Solid(object):
         #     if face in feature_faces:
         #         offset = feature_faces.index(face, 0)
         #         feature_faces[offset] = new_face
+
+    @property
+    def material(self):
+        return self._material
+
+    @material.setter
+    def material(self, value):
+        if self._material is not None:
+            if self._material == value:
+                return
+
+        self._material = value
+        if self._material is not None:
+            self.material.solids.add(self)
 
     def export_stl(self, filename):
         try:
@@ -354,12 +378,16 @@ class Solid(object):
         return buf.getvalue()
 
     @property
-    def shm_refinement_entry(self, offset=0):
+    def shm_refinement_entry(self, offset=0, write_internal_interfaces=False):
 
         local_offset = 4
         offset = offset + local_offset
 
-        hull_faces = self.faces
+        faces = set(self.faces)
+
+        if not write_internal_interfaces:
+            if 'internal_interfaces' in self.features.keys():
+                faces = faces - set(self.features['internal_interfaces'])
 
         buf = StringIO()
 
@@ -369,7 +397,7 @@ class Solid(object):
         buf.write(f"{' ' * (offset + 4)}regions\n")
         buf.write(f"{' ' * (offset + 4)}{'{'}\n")
 
-        for face in hull_faces:
+        for face in faces:
             face_level = f"({face.surface_mesh_setup.min_refinement_level} {face.surface_mesh_setup.max_refinement_level})"
             buf.write(f"{' ' * (offset + 8)}{str(face.txt_id)}           {'{'} level {face_level}; patchInfo {'{'} type patch; {'}'} {'}'}\n")
 

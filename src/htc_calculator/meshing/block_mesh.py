@@ -4464,6 +4464,8 @@ class BlockMesh(object):
 
     def create_mesh_solid(self, name=None, mesh_tool='snappyHexMesh', case_dir=None):
 
+        from ..case.boundary_conditions.face_bcs import FaceBoundaryCondition, interface
+
         logger.info(f"Creating mesh solid")
 
         if case_dir is None:
@@ -4495,10 +4497,15 @@ class BlockMesh(object):
         for boundary in self.mesh.boundaries.values():
             # Todo: add interfaces
             assigned_faces.update(boundary.faces)
+
+            face_bc = FaceBoundaryCondition.from_block_mesh_boundary(boundary)
+
             face = Face(name='face_' + boundary.name,
                         fc_face=FCPart.makeShell([x.fc_face for x in boundary.faces]),
                         block_mesh_faces=boundary.faces,
-                        boundary_condition=boundary)
+                        block_mesh_boundary_condition=boundary,
+                        boundary_condition=face_bc,
+                        solid=mesh_solid)
             mesh_solid._faces.append(face)
             mesh_solid.features[boundary.name] = face
 
@@ -4522,10 +4529,13 @@ class BlockMesh(object):
                             i_faces.append(face)
 
         local_wall_patch = BlockMeshBoundary.copy_to_mesh(wall_patch, self.mesh)
+        face_bc = FaceBoundaryCondition.from_block_mesh_boundary(local_wall_patch)
+
         face = Face(name='Wall Face',
                     fc_face=FCPart.makeShell([x.fc_face for x in wall_patches]),
                     block_mesh_faces=wall_patches,
-                    boundary_condition=local_wall_patch)
+                    block_mesh_boundary_condition=local_wall_patch,
+                    boundary_condition=face_bc)
         mesh_solid._faces.append(face)
         mesh_solid.features['walls'] = face
 
@@ -4547,14 +4557,19 @@ class BlockMesh(object):
                     block_mesh_faces=[*self.bottom_faces,
                                       *self.top_faces,
                                       *self.interfaces],
-                    boundary_condition=None)
+                    boundary_condition=interface)
 
         mesh_solid._faces.append(face)
         mesh_solid.features['interfaces'] = face
 
         # add default_faces
+        mesh_solid.features['interfaces'].boundary_condition = BlockMeshBoundary(name='Interface to Layer Material',
+                                                                                 type='patch',
+                                                                                 user_bc=None)
 
         mesh_solid.generate_solid_from_faces()
+
+        logger.info(f"Successfully created mesh solid")
 
         return mesh_solid
 
@@ -4575,7 +4590,11 @@ class BlockMesh(object):
         solid.write_of_geo(geo_dir, separate_interface=False)
 
         # do not do mesh refinement
-        solid.mesh.castellated_mesh = False
+        # solid.mesh.castellated_mesh = False
+
+        for face in solid.faces:
+            face.surface_mesh_setup.min_refinement_level = 0
+            face.surface_mesh_setup.max_refinement_level = 0
 
         logger.info(f"Successfully created snappyHexMesh solid from Block Mesh")
 

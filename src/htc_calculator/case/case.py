@@ -771,7 +771,7 @@ class OFCase(object):
 
         assembly = self.reference_face.assembly
 
-        assembly.solids[-1].run_meshing(split_mesh_regions=False)
+        # assembly.solids[-1].run_meshing(split_mesh_regions=False)
 
         for i, solid in enumerate(assembly.solids):
             print(f'{solid.name}')
@@ -792,7 +792,8 @@ class OFCase(object):
         logger.info(f'Successfully created and merged meshes')
 
         # logger.info(f'Splitting mesh regions')
-        # shell_handler.run_split_mesh_regions(workdir=self.case_dir)
+        shell_handler.run_split_mesh_regions(workdir=self.case_dir)
+        shell_handler.run_parafoam(workdir=self.case_dir)
         # logger.info(f'Successfully split mesh regions')
 
         materials = set()
@@ -806,11 +807,14 @@ class OFCase(object):
         write_region_properties(cell_zones, self.case_dir)
 
         # write boundary conditions
+        boundaries = []
+
         for i, layer in enumerate(self.reference_face.component_construction.layers):
             logger.info(f'Writing boundary conditions for layer {layer}')
             solid = layer.solid
             if i == 0:
                 if 'base_faces' in layer.solid.features:
+                    layer.solid.features['base_faces']
                     print('done')
 
 

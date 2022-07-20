@@ -26,12 +26,18 @@ class Face(object):
     def __init__(self, *args, **kwargs):
 
         self._boundary_condition = None
+        self._block_mesh_boundary_condition = None
+        self._material = None
+        self._normal = None
 
         self.id = kwargs.get('id', uuid.uuid4())
         # logger.debug(f'initializing face {self.id}')
 
         self.name = kwargs.get('name', None)
-        self._normal = kwargs.get('normal', None)
+        self.normal = kwargs.get('normal', None)
+        self.solid = kwargs.get('solid', None)
+        self.cell_zone = kwargs.get('cell_zone', None)
+        self.material = kwargs.get('_materials', None)
 
         self.fc_face = kwargs.get('fc_face', None)
 
@@ -46,6 +52,20 @@ class Face(object):
 
         self.block_mesh_faces = kwargs.get('block_mesh_faces', [])
         self.boundary_condition = kwargs.get('boundary_condition', None)
+        self.block_mesh_boundary_condition = kwargs.get('block_mesh_boundary_condition', None)
+
+    @property
+    def block_mesh_boundary_condition(self):
+        return self._block_mesh_boundary_condition
+
+    @block_mesh_boundary_condition.setter
+    def block_mesh_boundary_condition(self, value):
+        self._block_mesh_boundary_condition = value
+
+        if self.block_mesh_faces:
+            for block_mesh_face in self.block_mesh_faces:
+                if value != block_mesh_face.boundary:
+                    block_mesh_face.boundary = value
 
     @property
     def boundary_condition(self):
@@ -54,11 +74,6 @@ class Face(object):
     @boundary_condition.setter
     def boundary_condition(self, value):
         self._boundary_condition = value
-
-        if self.block_mesh_faces:
-            for block_mesh_face in self.block_mesh_faces:
-                if value != block_mesh_face.boundary:
-                    block_mesh_face.boundary = value
 
     @property
     def area(self):
@@ -94,6 +109,23 @@ class Face(object):
         if value == self._surface_mesh_setup:
             return
         self._surface_mesh_setup = value
+
+    @property
+    def material(self):
+        if self._material is None:
+            if self.solid is not None:
+                self._material = self.solid.material
+                self._material.solids.add(self)
+            if self.cell_zone is not None:
+                self._material = self.cell_zone.material
+                self._material.solids.add(self)
+        return self._material
+
+    @material.setter
+    def material(self, value):
+        self._material = value
+        if self._material is not None:
+            self._material.solids.add(self)
 
     def get_normal(self, point):
         uv = self.fc_face.Surface.parameter(point)

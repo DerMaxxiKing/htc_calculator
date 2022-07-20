@@ -647,6 +647,8 @@ class SnappyHexMesh(object):
             logging.error(f'{self.name}: no case_dir')
             return
 
+        logger.info(f'Writing snappyHexMeshDict for {self.name} to {case_dir}')
+
         # check if directory exists
         os.makedirs(case_dir, exist_ok=True)
         os.makedirs(os.path.join(case_dir, '0'), exist_ok=True)
@@ -656,6 +658,8 @@ class SnappyHexMesh(object):
         dst = os.path.join(case_dir, 'system', 'snappyHexMeshDict')
         with open(dst, 'w') as shmd:
             shmd.write(self.snappy_hex_mesh_dict)
+
+        logger.info(f'Successfully wrote snappyHexMeshDict for {self.name} to {case_dir}')
 
     def geom_string(self):
 

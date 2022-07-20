@@ -310,7 +310,7 @@ class ShellHandler:
         self.execute(f'paraFoam -touchAll', cwd=workdir)
 
     def run_parafoam(self, workdir):
-        shin, shout, sherr = self.execute(f'paraFoam -touchAll', cwd=workdir)
+        return self.execute(f'paraFoam -touchAll', cwd=workdir)
 
     def copy_mesh(self, source, destination, time=None):
 

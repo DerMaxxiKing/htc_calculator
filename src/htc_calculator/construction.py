@@ -1,6 +1,8 @@
 import os
 import uuid
 from abc import ABCMeta, abstractmethod
+from .case.boundary_conditions import *
+from .logger import logger
 
 try:
     import importlib.resources as pkg_resources
@@ -26,6 +28,7 @@ class Material(object, metaclass=ABCMeta):
         self.id = kwargs.get('id', uuid.uuid4())
         self.name = kwargs.get('name', None)
         self.cell_zone = kwargs.get('cell_zone', None)
+        self.solids = kwargs.get('solids', set())
 
         self.density = kwargs.get('density', 1000)                                      # kg / m^3
         self.specific_heat_capacity = kwargs.get('specific_heat_capacity', 1000)        # J / kg K
@@ -41,6 +44,18 @@ class Material(object, metaclass=ABCMeta):
 
         self.boundaries = kwargs.get('boundaries', {})
         self.initial_temperature = kwargs.get('initial_temperature', 273.15 + 20)
+
+        self.case_dir = kwargs.get('case_dir', None)
+        self.case = kwargs.get('case', None)
+
+        self.alphat = kwargs.get('alphat', Alphat())
+        self.epsilon = kwargs.get('epsilon', Epsilon())
+        self.k = kwargs.get('k', K())
+        self.nut = kwargs.get('nut', Nut())
+        self.p = kwargs.get('p', P())
+        self.p_rgh = kwargs.get('p_rgh', PRgh())
+        self.t = kwargs.get('t', T())
+        self.u = kwargs.get('u', U())
 
     @property
     @abstractmethod
@@ -82,6 +97,10 @@ class Material(object, metaclass=ABCMeta):
             tp_entry = tp_entry.replace('<n_proc>', str(n_proc))
             self._decompose_par_dict = tp_entry
         return self._decompose_par_dict
+
+    @property
+    def change_dict_entry(self):
+        return self.create_change_dict_entry()
 
     def init_directory(self, case_dir):
         os.makedirs(os.path.join(case_dir, 'constant', str(self.txt_id)), exist_ok=True)
@@ -126,6 +145,47 @@ class Material(object, metaclass=ABCMeta):
     def create_cell_zone(self):
         from .meshing.block_mesh import CellZone
         return CellZone(material=self)
+
+    def update_bcs(self):
+
+        for boundary in self.boundaries:
+            logger.debug(f'updating_bcs')
+
+            if boundary.type == 'interface':
+                bc_key = boundary.txt_id
+            else:
+                bc_key = boundary.txt_id
+
+            if isinstance(boundary, CyclicAMI):
+                bc_key = boundary.txt_id
+
+            self.t.patches[bc_key] = boundary.user_bc.t
+
+            if isinstance(self.material, Fluid):
+                self.alphat.patches[bc_key] = boundary.user_bc.alphat
+                self.epsilon.patches[bc_key] = boundary.user_bc.epsilon
+                self.k.patches[bc_key] = boundary.user_bc.k
+                self.nut.patches[bc_key] = boundary.user_bc.nut
+                self.p.patches[bc_key] = boundary.user_bc.p
+                self.p_rgh.patches[bc_key] = boundary.user_bc.p_rgh
+                self.u.patches[bc_key] = boundary.user_bc.u
+
+        logger.debug(f'updating_bcs')
+
+    def write_boundary_conditions(self, case_dir):
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        # write T:
+        self.t.internal_field_value = self.case.bc.initial_temperature[self]
+        self.t.write(os.path.join(case_dir, '0', self.txt_id))
+
+        for bc_name in ['alphat', 'epsilon', 'k', 'nut', 'p', 'p_rgh', 'u']:
+            bc_file = getattr(self, bc_name)
+            bc_file.write(os.path.join(case_dir, '0', self.txt_id))
+
+    def create_change_dict_entry(self):
+        return f'{self.id}'
 
 
 class Solid(Material):

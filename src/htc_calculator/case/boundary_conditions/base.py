@@ -286,3 +286,48 @@ class CyclicAMI(BoundaryCondition):
         # template = deepcopy(self.template)
         # template = template.replace('<value>', str(self.value))
         # return template
+
+
+class TurbulentTemperatureCoupledBaffleMixed(BoundaryCondition):
+
+    template = cleandoc("""
+    {
+        type            compressible::turbulentTemperatureCoupledBaffleMixed;
+        Tnbr            <tnbr>;
+        value           <value>;
+    }
+    """)
+
+    def __init__(self, *args, **kwargs):
+        """
+        # https://www.openfoam.com/documentation/guides/latest/api/classFoam_1_1compressible_1_1turbulentTemperatureCoupledBaffleMixedFvPatchScalarField.html
+        Mixed boundary condition for temperature, to be used for heat-transfer on back-to-back baffles. Optional thin thermal layer resistances can be specified through thicknessLayers and kappaLayers entries.
+
+        Specifies gradient and temperature such that the equations are the same on both sides:
+        refGradient = zero gradient
+        refValue = neighbour value
+        mixFraction = nbrKDelta / (nbrKDelta + myKDelta())
+        where KDelta is heat-transfer coefficient K * deltaCoeffs
+
+        The thermal conductivity kappa can either be retrieved from various possible sources, as detailed in the class temperatureCoupledBase.
+
+        Tnbr	                    name of the field	no	T
+        thicknessLayers	            list of thicknesses per layer [m]	no
+        kappaLayers	                list of thermal conductivities per layer [W/m/K]	no
+        thicknessLayer	            single thickness of layer [m]	no
+        kappaLayer	                corresponding thermal conductivity [W/m/K]	no
+        kappaMethod	                inherited from temperatureCoupledBase	inherited
+        kappa	                    inherited from temperatureCoupledBase	inherited
+
+        :param args:
+        :param kwargs: inletValue	Inlet value for reverse flow	yes
+        """
+        BoundaryCondition.__init__(self, *args, **kwargs)
+        self._inlet_value = None
+        self.tnbr = kwargs.get('tnbr', 'T')
+
+    def generate_dict_entry(self, *args, **kwargs):
+        template = deepcopy(self.template)
+        template = template.replace('<value>', str(self.value))
+        template = template.replace('<tnbr>', str(self.tnbr))
+        return template
