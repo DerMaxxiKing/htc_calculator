@@ -73,7 +73,19 @@ class Face(object):
 
     @boundary_condition.setter
     def boundary_condition(self, value):
+
+        if self._boundary_condition == value:
+            return
+
+        if self._boundary_condition is not None:
+            try:
+                self._boundary_condition.faces.remove(self)
+            except Exception as e:
+                pass
+
         self._boundary_condition = value
+        if value is not None:
+            value.faces.add(self)
 
     @property
     def area(self):

@@ -185,6 +185,13 @@ class Material(object, metaclass=ABCMeta):
             bc_file.write(os.path.join(case_dir, '0', self.txt_id))
 
     def create_change_dict_entry(self):
+
+        boundary_entries = "\n".join(x.boundary_entry for x in self.boundaries)
+
+        field_entries = []
+        for field_name in ['t','alphat', 'epsilon', 'k', 'nut', 'p', 'p_rgh', 'u']:
+            field_entries.append("\n".join(x.field_entry(field_name) for x in self.boundaries))
+
         return f'{self.id}'
 
 

@@ -113,6 +113,25 @@ class FaceBoundaryCondition(object, metaclass=BoundaryConditionMetaMock):
             fo.cell_zone = self.cell_zone
             raise NotImplementedError
 
+    @property
+    def boundary_entry(self):
+
+        entries = []
+        for face in self.faces:
+            entries.append(f'\t"{face.txt_id}"\n'
+                           '\t{\n'
+                           f'\t\ttype            {self.type};\n'
+                           '\t}\n')
+
+        return '\n'.join(entries)
+
+    def field_entry(self, field_name):
+        entries = []
+        for face in self.faces:
+            entries.append(f'\t"{self}"\n' + getattr(self.user_bc, field_name).dict_entry + '\n')
+
+        return '\n'.join(entries)
+
     def __repr__(self):
         return f'Boundary {self.id} (name={self.name}, type={self.type}, faces={self.faces})'
 

@@ -4464,7 +4464,7 @@ class BlockMesh(object):
 
     def create_mesh_solid(self, name=None, mesh_tool='snappyHexMesh', case_dir=None):
 
-        from ..case.boundary_conditions.face_bcs import FaceBoundaryCondition, interface
+        from ..case.boundary_conditions.face_bcs import FaceBoundaryCondition, Interface
 
         logger.info(f"Creating mesh solid")
 
@@ -4557,7 +4557,7 @@ class BlockMesh(object):
                     block_mesh_faces=[*self.bottom_faces,
                                       *self.top_faces,
                                       *self.interfaces],
-                    boundary_condition=interface)
+                    boundary_condition=Interface())
 
         mesh_solid._faces.append(face)
         mesh_solid.features['interfaces'] = face
