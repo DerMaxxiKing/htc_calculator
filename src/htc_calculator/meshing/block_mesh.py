@@ -1631,6 +1631,7 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         self._alt_txt_id = None
         self._function_objects = None
         self._fc_face = None
+        self._geo_face = None
 
         self.id = next(BlockMeshBoundary.id_iter)
         self.alt_id = next(BlockMeshBoundary.id_iter)       # alternative id, needed in changePatchDict as existing patch type will remain the same
@@ -1656,6 +1657,7 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
         self._cell_zone = kwargs.get('cell_zone', None)
 
         self.function_objects = kwargs.get('function_objects', [])
+        self.geo_face = kwargs.get('geo_face', None)
 
     def add_face(self, face):
         self._faces.add(face)
@@ -1676,10 +1678,13 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
     @property
     def txt_id(self):
         if self._txt_id is None:
-            if isinstance(self.id, uuid.UUID):
-                self._txt_id = re.sub('\W+','', 'a' + str(self.id))
+            if self.geo_face is None:
+                if isinstance(self.id, uuid.UUID):
+                    self._txt_id = re.sub('\W+','', 'a' + str(self.id))
+                else:
+                    self._txt_id = re.sub('\W+','', 'a' + str(self.id))
             else:
-                self._txt_id = re.sub('\W+','', 'a' + str(self.id))
+                self._txt_id = self.geo_face.txt_id
         return self._txt_id
 
     @txt_id.setter
@@ -1758,6 +1763,15 @@ class BlockMeshBoundary(object, metaclass=BoundaryMetaMock):
     @property
     def fc_face(self):
         raise NotImplementedError
+
+    @property
+    def geo_face(self):
+        return self._geo_face
+
+    @geo_face.setter
+    def geo_face(self, value):
+        self._geo_face = value
+        self._txt_id = None
 
     def __repr__(self):
         return f'Boundary {self.id} (name={self.name}, type={self.type}, faces={self.faces})'
@@ -4506,6 +4520,7 @@ class BlockMesh(object):
                         block_mesh_boundary_condition=boundary,
                         boundary_condition=face_bc,
                         solid=mesh_solid)
+            boundary.geo_face = face
             mesh_solid._faces.append(face)
             mesh_solid.features[boundary.name] = face
 
@@ -4536,6 +4551,7 @@ class BlockMesh(object):
                     block_mesh_faces=wall_patches,
                     block_mesh_boundary_condition=local_wall_patch,
                     boundary_condition=face_bc)
+        local_wall_patch.geo_face = face
         mesh_solid._faces.append(face)
         mesh_solid.features['walls'] = face
 
@@ -4549,6 +4565,9 @@ class BlockMesh(object):
                 internal_interfaces.append(face)
 
         mesh_solid.features['internal_interfaces'] = internal_interfaces
+        interface_block_mesh_bc = BlockMeshBoundary(name='Interface to Layer Material',
+                                                    type='patch',
+                                                    user_bc=None)
 
         # add interfaces
         face = Face(fc_face=FCPart.makeShell([x.fc_face for x in [*self.bottom_faces,
@@ -4557,15 +4576,15 @@ class BlockMesh(object):
                     block_mesh_faces=[*self.bottom_faces,
                                       *self.top_faces,
                                       *self.interfaces],
-                    boundary_condition=Interface())
+                    boundary_condition=Interface(),
+                    block_mesh_boundary_condition=interface_block_mesh_bc)
 
+        interface_block_mesh_bc.geo_face = face
         mesh_solid._faces.append(face)
         mesh_solid.features['interfaces'] = face
 
         # add default_faces
-        mesh_solid.features['interfaces'].boundary_condition = BlockMeshBoundary(name='Interface to Layer Material',
-                                                                                 type='patch',
-                                                                                 user_bc=None)
+        mesh_solid.features['interfaces'].block_mesh_boundary_condition = interface_block_mesh_bc
 
         mesh_solid.generate_solid_from_faces()
 

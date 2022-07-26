@@ -55,6 +55,13 @@ class Face(object):
         self.block_mesh_boundary_condition = kwargs.get('block_mesh_boundary_condition', None)
 
     @property
+    def mesh(self):
+        if self.block_mesh_boundary_condition is None:
+            return None
+        else:
+            return self.block_mesh_boundary_condition.mesh
+
+    @property
     def block_mesh_boundary_condition(self):
         return self._block_mesh_boundary_condition
 

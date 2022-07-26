@@ -657,15 +657,24 @@ class ActivatedReferenceFace(ReferenceFace):
         common = cutted_fc_solid.Shells[0].common(pipe_mesh_solid.fc_solid.Shape.Shells[0])
 
         base_faces = []
-        _ = [base_faces.extend(x.fc_face.Faces) for x in pipe_layer_solid.features['base_faces']]
+        if isinstance(pipe_layer_solid.features['base_faces'], list):
+            _ = [base_faces.extend(x.fc_face.Faces) for x in pipe_layer_solid.features['base_faces']]
+        else:
+            base_faces.extend(pipe_layer_solid.features['base_faces'].fc_face.Faces)
         base_faces_shell = FCPart.makeShell(base_faces)
 
         top_faces = []
-        _ = [top_faces.extend(x.fc_face.Faces) for x in pipe_layer_solid.features['top_faces']]
+        if isinstance(pipe_layer_solid.features['top_faces'], list):
+            _ = [top_faces.extend(x.fc_face.Faces) for x in pipe_layer_solid.features['top_faces']]
+        else:
+            top_faces.extend(pipe_layer_solid.features['top_faces'].fc_face.Faces)
         top_faces_shell = FCPart.makeShell(top_faces)
 
         side_faces = []
-        _ = [side_faces.extend(x.fc_face.Faces) for x in pipe_layer_solid.features['side_faces']]
+        if isinstance(pipe_layer_solid.features['side_faces'], list):
+            _ = [side_faces.extend(x.fc_face.Faces) for x in pipe_layer_solid.features['side_faces']]
+        else:
+            side_faces.extend(pipe_layer_solid.features['side_faces'].fc_face.Faces)
         side_faces_shell = FCPart.makeShell(side_faces)
 
         base_face = Face(name='base_face', fc_face=cutted_fc_solid.Shells[0].common(base_faces_shell))
@@ -960,7 +969,9 @@ class ActivatedReferenceFace(ReferenceFace):
                                  interfaces=[],
                                  faces=None,
                                  topology=assembly.topology,
-                                 reference_face=self)
+                                 reference_face=self,
+                                 features={'pipe_mesh_solid': mesh_solid,
+                                           'pipe_layer_solid': cutted_solid})
 
         # for i, solid in enumerate([x.solid for x in self.component_construction.layers]):
         #     solid

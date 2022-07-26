@@ -761,6 +761,8 @@ class OFCase(object):
 
     def run_with_separate_meshes_3(self):
 
+        from .boundary_conditions.face_bcs import bottom_side, top_side, wall, Interface
+
         self.init_case()
         self.write_control_dict()
         self.write_decompose_par_dict()
@@ -791,7 +793,7 @@ class OFCase(object):
 
         logger.info(f'Successfully created and merged meshes')
 
-        # logger.info(f'Splitting mesh regions')
+        logger.info(f'Splitting mesh ...')
         shell_handler.run_split_mesh_regions(workdir=self.case_dir)
         shell_handler.run_parafoam(workdir=self.case_dir)
         # logger.info(f'Successfully split mesh regions')
@@ -806,22 +808,61 @@ class OFCase(object):
         # write region properties:
         write_region_properties(cell_zones, self.case_dir)
 
-        # write boundary conditions
-        boundaries = []
+        # update boundary conditions
+        # --------------------------------------------------------------------------------------------------------------
 
         for i, layer in enumerate(self.reference_face.component_construction.layers):
             logger.info(f'Writing boundary conditions for layer {layer}')
             solid = layer.solid
             if i == 0:
-                if 'base_faces' in layer.solid.features:
-                    layer.solid.features['base_faces']
-                    print('done')
+                if 'base_faces' in solid.features:
+                    solid.features['base_faces'].boundary_condition = bottom_side
+                else:
+                    logger.error(f'Could not find base face for layer {i} in features: solid {layer.solid}.\n '
+                                 f'Features are: {solid.features.keys()}')
+                    raise Exception(f'Could not find base face for layer {i} in features: solid {layer.solid}.\n '
+                                    f'Features are: {solid.features.keys()}')
+            if i == self.reference_face.component_construction.layers.__len__() - 1:
+                if 'top_faces' in solid.features:
+                    solid.features['top_faces'].boundary_condition = top_side
+                else:
+                    logger.error(f'Could not find base face for layer {i} in features: solid {layer.solid}.\n '
+                                 f'Features are: {solid.features.keys()}')
+                    raise Exception(f'Could not find base face for layer {i} in features: solid {layer.solid}.\n '
+                                    f'Features are: {solid.features.keys()}')
+            else:
+                # add interface between layers
+                if 'top_faces' in solid.features:
+                    side_1_face = solid.features['top_faces']
+                else:
+                    logger.error(f'Could not find top faces for layer {i} in features: solid {layer.solid}.\n '
+                                 f'Features are: {solid.features.keys()}')
+                    raise Exception(f'Could not find top faces for layer {i} in features: solid {layer.solid}.\n '
+                                    f'Features are: {solid.features.keys()}')
+                next_layer_solid = self.reference_face.component_construction.layers[i+1].solid
+                if 'base_faces' in next_layer_solid.features:
+                    side_2_face = next_layer_solid.features['base_faces']
+                else:
+                    logger.error(f'Could not find base faces for layer {i+1} in features: solid {next_layer_solid}.\n '
+                                 f'Features are: {next_layer_solid.features.keys()}')
+                    raise Exception(f'Could not find base faces for layer {i+1} in features: solid {next_layer_solid}.\n '
+                                    f'Features are: {next_layer_solid.features.keys()}')
+
+                side_1_face.boundary_condition = Interface(face_1=side_1_face, face_2=side_2_face)
+                side_2_face.boundary_condition = Interface(face_1=side_2_face, face_2=side_1_face)
+
+            if 'side_faces' in solid.features:
+                solid.features['side_faces'].boundary_condition = wall
+
+        # add interface between pipe and layer
+        side_1_face = assembly.features['pipe_mesh_solid'].features['interfaces']
+        side_2_face = assembly.features['pipe_layer_solid'].features['pipe_mesh_interfaces']
+
+        side_1_face.boundary_condition = Interface(face_1=side_1_face, face_2=side_2_face)
+        side_2_face.boundary_condition = Interface(face_1=side_2_face, face_2=side_1_face)
 
 
-
-
-
-
+        print('done')
 
 
 def execute(command, cwd):
