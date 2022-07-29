@@ -1,6 +1,7 @@
 from uuid import UUID, uuid4
 from re import sub
 from .user_bcs import *
+from ..utils import indent_text
 
 
 class BoundaryConditionMetaMock(type):
@@ -116,19 +117,23 @@ class FaceBoundaryCondition(object, metaclass=BoundaryConditionMetaMock):
     @property
     def boundary_entry(self):
 
-        entries = []
-        for face in self.faces:
-            entries.append(f'\t"{face.txt_id}"\n'
-                           '\t{\n'
-                           f'\t\ttype            {self.type};\n'
-                           '\t}\n')
+        # entries = []
+        # for face in self.faces:
+        #     entries.append(f'\t"{face.txt_id}"\n'
+        #                    '\t{\n'
+        #                    f'\t\ttype            {self.type};\n'
+        #                    '\t}\n')
+        #
+        # return '\n'.join(entries)
 
-        return '\n'.join(entries)
+        return ('\t{\n'
+                f'\t\ttype            {self.type};\n'
+                '\t}')
 
     def field_entry(self, field_name):
         entries = []
         for face in self.faces:
-            entries.append(f'\t"{self}"\n' + getattr(self.user_bc, field_name).dict_entry + '\n')
+            entries.append(f'\t{face.txt_id}\n' + indent_text(getattr(self.user_bc, field_name).dict_entry, 1) + '\n')
 
         return '\n'.join(entries)
 
@@ -150,6 +155,34 @@ class Interface(FaceBoundaryCondition):
         FaceBoundaryCondition.__init__(self, *args, **kwargs)
         self.face_1 = kwargs.get('face_1', None)
         self.face_2 = kwargs.get('face_2', None)
+        self.transform: str = kwargs.get('transform', 'noOrdering')
+        self.match_tolerance: float = kwargs.get('match_tolerance', 0.1)
+        self.interface_type: str = kwargs.get('interface_type', 'mapped_wall')
+
+        if self.interface_type == 'cyclic_ami':
+            self.user_bc = SolidCyclicAMI()
+        elif self.interface_type == 'mapped_wall':
+            self.type = 'wall'
+            self.user_bc = FluidSolidInterface()
+
+    @property
+    def boundary_entry(self):
+
+        if self.interface_type == 'cyclic_ami':
+            return ('\t{\n'
+                    '\t\ttype             cyclicAMI;\n'
+                    f'\t\tneighbourPatch  {self.face_2.txt_id};\n'
+                    f'\t\tsampleRegion    {self.face_2.material.txt_id};\n'
+                    f'\t\ttransform       {self.transform};\n'
+                    f"\t{'}'}")
+
+        elif self.interface_type == 'mapped_wall':
+            return ('\t{\n'
+                    '\t\ttype             mappedWall;\n'
+                    '\t\tsampleMode       nearestPatchFace;'
+                    f'\t\tsamplePatch     {self.face_2.txt_id};\n'
+                    f'\t\tsampleRegion    {self.face_2.material.txt_id};\n'
+                    f"\t{'}'}")
 
 
 inlet = FaceBoundaryCondition(name='inlet', type='patch', user_bc=VolumeFlowInlet())

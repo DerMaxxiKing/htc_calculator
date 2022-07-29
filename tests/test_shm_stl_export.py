@@ -102,7 +102,8 @@ my_bc = TabsBC(inlet_volume_flow=4.1666e-5,
                initial_temperatures={water: 323.15,
                                      aluminium: 293.16,
                                      concrete: 293.16,
-                                     rockwool: 293.16})
+                                     rockwool: 293.16},
+               g=(0, 0, 0))
 
 case = OFCase(reference_face=tabs1,
               bc=my_bc,

@@ -1,12 +1,14 @@
 import paramiko
 import re
 import os
+from inspect import cleandoc
 from ..logger import logger
 from multiprocessing import cpu_count
 from math import floor
 from shutil import copyfile
 from time import sleep
 import csv
+from ..case.of_parser import CppDictParser
 
 from ..config import ssh_pwd, ssh_user, host
 
@@ -71,10 +73,16 @@ class ShellHandler:
                     execute('cd folder_name')
         """
         if cwd is not None:
+
+            _ = self.execute('echo "clearing shout"')
             try:
                 shin, shout, sherr = self.execute('pwd')
                 sleep(0.1)
-                pwd = shout[-1]
+                pwd = shout[0]
+                if pwd.startswith('root@openfoam:'):
+                    pwd = pwd[len('root@openfoam:'):]
+                pwd = pwd.rstrip()
+
             except Exception as e:
                 pwd = None
                 logger.warning(f'Could not get pwd')
@@ -342,6 +350,34 @@ class ShellHandler:
 
         return True
 
+    def list_regions(self, workdir):
+        res = self.execute(f'foamListRegions', cwd=workdir)
+        return [x.rstrip('\n') for x in res[1][0:-1]]
+
+    def run_change_dict(self, workdir, regions=None):
+        if regions is None:
+            regions = self.list_regions(workdir)
+
+        if not isinstance(regions, list):
+            regions = [regions]
+
+        for region in regions:
+
+            try:
+                of_dict = CppDictParser.from_file(os.path.join(workdir, 'system', region, 'changeDictionaryDict'))
+            except Exception as e:
+                logger.error(f'Could not read changeDictionaryDict for region {region} in {workdir}:\n{e}')
+                raise Exception(f'Could not read changeDictionaryDict for region {region} in {workdir}:\n{e}')
+
+            for key in of_dict.values.keys():
+                if key in ['FoamFile', 'boundary']:
+                    continue
+                write_empty_field(key, workdir, region)
+
+            logger.info(f'Running changeDictionary for region {region} in {workdir}')
+            res = self.execute(f'changeDictionary -region {region}', cwd=workdir)
+            print('done')
+
 
 sh = ShellHandler(host, ssh_user, ssh_pwd)
 
@@ -349,22 +385,69 @@ sh = ShellHandler(host, ssh_user, ssh_pwd)
 def get_latest_timestep(directory):
     latest_ts = None
 
-    shin, shout, sherr = sh.execute('ls -a', cwd=directory)
+    shin, shout, sherr = sh.execute('foamListTimes -latestTime -withZero', cwd=directory)
+    return shout[0].rstrip('\n')
 
-    directories = '\n'.join(shout).split()
+    # shin, shout, sherr = sh.execute('ls -a', cwd=directory)
+    #
+    # directories = '\n'.join(shout).split()
+    #
+    # for directory in directories:
+    #
+    #     try:
+    #         ts = float(directory)
+    #         _, __, err = sh.execute(f'[ -d {directory} ]', cwd=directory)
+    #         if err:
+    #             continue
+    #
+    #         if latest_ts is None:
+    #             latest_ts = directory
+    #         elif ts > float(latest_ts):
+    #             latest_ts = directory
+    #     except ValueError:
+    #         continue
+    # return latest_ts
 
-    for directory in directories:
 
-        try:
-            ts = float(directory)
-            _, __, err = sh.execute(f'[ -d {directory} ]', cwd=directory)
-            if err:
-                continue
+def write_empty_field(field_name, case_dir, region_id):
+    field_template = cleandoc("""
+    /*--------------------------------*- C++ -*----------------------------------*\
+      =========                 |
+      \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+       \\    /   O peration     | Website:  https://openfoam.org
+        \\  /    A nd           | Version:  9
+         \\/     M anipulation  |
+    \*---------------------------------------------------------------------------*/
+    FoamFile
+    {
+        format      ascii;
+        class       volScalarField;
+        location    "0/<region_id>";
+        object      <field_name>;
+    }
+    // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-            if latest_ts is None:
-                latest_ts = directory
-            elif ts > float(latest_ts):
-                latest_ts = directory
-        except ValueError:
-            continue
-    return latest_ts
+    dimensions      [ 0 0 0 1 0 0 0 ];
+
+    internalField   0;
+
+    boundaryField
+    {
+        ".*"
+        {
+            type            calculated;
+            value           $internalField;
+        }
+    }
+
+    // ************************************************************************* //
+    """)
+
+    field_str = field_template
+    field_str = field_str.replace('<field_name>', field_name)
+    field_str = field_str.replace('<region_id>', region_id)
+
+    os.makedirs(os.path.join(case_dir, '0', region_id), exist_ok=True)
+    full_filename = os.path.join(case_dir, '0', region_id, field_name)
+    with open(full_filename, "w") as f:
+        f.write(field_str)

@@ -10,7 +10,6 @@ import numpy as np
 import gmsh
 from copy import deepcopy
 # from pygmsh.helpers import extract_to_meshio
-
 from .logger import logger
 from .tools import extract_to_meshio
 from .meshing.surface_mesh_parameters import SurfaceMeshParameters, default_surface_mesh_parameter
@@ -37,7 +36,7 @@ class Face(object):
         self.normal = kwargs.get('normal', None)
         self.solid = kwargs.get('solid', None)
         self.cell_zone = kwargs.get('cell_zone', None)
-        self.material = kwargs.get('_materials', None)
+        self.material = kwargs.get('material', None)
 
         self.fc_face = kwargs.get('fc_face', None)
 
@@ -132,12 +131,9 @@ class Face(object):
     @property
     def material(self):
         if self._material is None:
-            if self.solid is not None:
-                self._material = self.solid.material
-                self._material.solids.add(self)
-            if self.cell_zone is not None:
-                self._material = self.cell_zone.material
-                self._material.solids.add(self)
+            from .solid import MultiMaterialSolid
+            if not isinstance(self.solid, MultiMaterialSolid):
+                self.material = self.solid.material
         return self._material
 
     @material.setter
@@ -145,6 +141,10 @@ class Face(object):
         self._material = value
         if self._material is not None:
             self._material.solids.add(self)
+
+    @property
+    def boundary_entry(self):
+        return f'\t{self.txt_id}\n' + self.boundary_condition.boundary_entry + '\n'
 
     def get_normal(self, point):
         uv = self.fc_face.Surface.parameter(point)

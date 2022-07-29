@@ -1,6 +1,6 @@
 from ..logger import logger
 import subprocess
-
+from textwrap import indent
 
 def run_parafoam_touch_all(case_dir):
     logger.info(f'Running paraFoam -touchAll')
@@ -19,3 +19,7 @@ def run_parafoam_touch_all(case_dir):
         logger.error(f"{res.stderr.decode('ascii')}")
 
     return True
+
+
+def indent_text(text, num_tabs=1):
+    return indent(text, prefix='\t'*num_tabs)

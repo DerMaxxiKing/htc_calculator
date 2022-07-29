@@ -6,6 +6,16 @@ from .u import VolumeFlowRate, PressureInletOutletVelocity, NoSlip
 from .nut import NutkWallFunction
 from .t import TurbulentTemperatureCoupledBaffleMixed, ExternalWallHeatFluxTemperature
 
+of_field_name_lookup_dict = {'alphat': 'alphat',
+                             'epsilon': 'epsilon',
+                             'k': 'k',
+                             'nut': 'nut',
+                             'p': 'p',
+                             'p_rgh': 'p_rgh',
+                             't': 'T',
+                             'u': 'U',
+                             }
+
 
 class UserBC(object):
 

@@ -1,8 +1,12 @@
 import os
 import uuid
+from inspect import cleandoc
 from abc import ABCMeta, abstractmethod
 from .case.boundary_conditions import *
 from .logger import logger
+from .case.boundary_conditions.user_bcs import of_field_name_lookup_dict
+from .case.utils import indent_text
+from PyFoam.RunDictionary.ParsedParameterFile import ParsedParameterFile
 
 try:
     import importlib.resources as pkg_resources
@@ -107,6 +111,47 @@ class Material(object, metaclass=ABCMeta):
         os.makedirs(os.path.join(case_dir, 'system', str(self.txt_id)), exist_ok=True)
         os.makedirs(os.path.join(case_dir, '0', str(self.txt_id)), exist_ok=True)
 
+    def write_empty_field(self, field_name, case_dir=None):
+        field_template = cleandoc("""
+        /*--------------------------------*- C++ -*----------------------------------*\
+          =========                 |
+          \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+           \\    /   O peration     | Website:  https://openfoam.org
+            \\  /    A nd           | Version:  9
+             \\/     M anipulation  |
+        \*---------------------------------------------------------------------------*/
+        FoamFile
+        {
+            format      ascii;
+            class       volScalarField;
+            location    "0/<region_id>";
+            object      <field_name>;
+        }
+        // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+        dimensions      [ 0 0 0 1 0 0 0 ];
+
+        internalField   0;
+
+        boundaryField
+        {
+        }
+
+        // ************************************************************************* //
+        """)
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        field_str = field_template
+        field_str = field_str.replace('<field_name>', field_name)
+        field_str = field_str.replace('<region_id>', self.txt_id)
+
+        os.makedirs(os.path.join(case_dir, '0', str(self.txt_id)), exist_ok=True)
+        full_filename = os.path.join(case_dir, 'system', str(self.txt_id), field_name)
+        with open(full_filename, "w") as f:
+            f.write(field_str)
+
     def generate_thermo_physical_properties_entry(self):
         tp_entry = pkg_resources.read_text(solid_resources, 'thermophysicalProperties')
         tp_entry = tp_entry.replace('<material_id>', self.txt_id)
@@ -131,6 +176,10 @@ class Material(object, metaclass=ABCMeta):
             f.write(self.decompose_par_dict)
 
     def write_fvschemes(self, case_dir):
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
         os.makedirs(os.path.join(case_dir, 'system', str(self.txt_id)), exist_ok=True)
         full_filename = os.path.join(case_dir, 'system', str(self.txt_id), 'fvSchemes')
         with open(full_filename, "w") as f:
@@ -161,7 +210,7 @@ class Material(object, metaclass=ABCMeta):
 
             self.t.patches[bc_key] = boundary.user_bc.t
 
-            if isinstance(self.material, Fluid):
+            if isinstance(self, Fluid):
                 self.alphat.patches[bc_key] = boundary.user_bc.alphat
                 self.epsilon.patches[bc_key] = boundary.user_bc.epsilon
                 self.k.patches[bc_key] = boundary.user_bc.k
@@ -184,15 +233,48 @@ class Material(object, metaclass=ABCMeta):
             bc_file = getattr(self, bc_name)
             bc_file.write(os.path.join(case_dir, '0', self.txt_id))
 
-    def create_change_dict_entry(self):
+    def create_change_dict_entry(self, case_dir=None):
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        template = pkg_resources.read_text(case_resources, 'changeDictionaryDict')
 
         boundary_entries = "\n".join(x.boundary_entry for x in self.boundaries)
+        template = template.replace('<boundaries>', boundary_entries)
 
         field_entries = []
-        for field_name in ['t','alphat', 'epsilon', 'k', 'nut', 'p', 'p_rgh', 'u']:
-            field_entries.append("\n".join(x.field_entry(field_name) for x in self.boundaries))
 
-        return f'{self.id}'
+        if isinstance(self, Solid):
+            field_names = ['t']
+        elif isinstance(self, Fluid):
+            field_names = ['t', 'alphat', 'epsilon', 'k', 'nut', 'p', 'p_rgh', 'u']
+
+        for field_name in field_names:
+            field_str = (f'{of_field_name_lookup_dict[field_name]}\n'
+                         '{\n'
+                         f'\tinternalField   {self.__getattribute__(field_name).internal_field_value};\n'
+                         f'\tboundaryField\n'
+                         '\t{\n')
+
+            field_str = field_str + indent_text(
+                "\n".join(x.field_entry(field_name) for x in self.boundaries.values() if x.user_bc is not None), 1)
+            field_str = field_str + '\t}\n}\n'
+            field_entries.append(field_str)
+
+        template = template.replace('<field_entries>', "\n".join(field_entries))
+
+        return template
+
+    def write_change_dict(self, case_dir):
+        if case_dir is None:
+            case_dir = self.case_dir
+        os.makedirs(os.path.join(case_dir, 'system', str(self.txt_id)), exist_ok=True)
+        full_filename = os.path.join(case_dir, 'system', str(self.txt_id), 'changeDictionaryDict')
+        logger.info(f'Writing change dictionary for {self.txt_id} to {full_filename}')
+        with open(full_filename, "w") as f:
+            f.write(self.change_dict_entry)
+        logger.info(f'Successfully written change dictionary')
 
 
 class Solid(Material):

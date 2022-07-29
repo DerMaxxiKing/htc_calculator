@@ -261,15 +261,13 @@ class CyclicAMI(BoundaryCondition):
 
     template = cleandoc("""
     {
-        type            compressible::turbulentTemperatureCoupledBaffleMixed;
-        value           $internalField;
-        Tnbr            T;
+        type            cyclicAMI;
     }
     """)
 
     def __init__(self, *args, **kwargs):
         """
-        # https://www.openfoam.com/documentation/guides/latest/api/classFoam_1_1inletOutletFvPatchField.html
+        # https://www.openfoam.com/documentation/guides/latest/doc/guide-bcs-coupled-cyclic-ami.html
         This boundary condition provides a generic outflow condition, with
         specified inflow for the case of return flow.
         :param args:
@@ -286,6 +284,31 @@ class CyclicAMI(BoundaryCondition):
         # template = deepcopy(self.template)
         # template = template.replace('<value>', str(self.value))
         # return template
+
+
+class TemperatureCoupledBaffleMixed(BoundaryCondition):
+    template = cleandoc("""
+        {
+            type            compressible::turbulentTemperatureCoupledBaffleMixed;
+            value           <value>;
+            Tnbr            T;
+        }
+        """)
+
+    def __init__(self, *args, **kwargs):
+        """
+        # https://www.openfoam.com/documentation/guides/latest/doc/guide-bcs-coupled-cyclic-ami.html
+        This boundary condition provides a generic outflow condition, with
+        specified inflow for the case of return flow.
+        :param args:
+        :param kwargs: inletValue	Inlet value for reverse flow	yes
+        """
+        BoundaryCondition.__init__(self, *args, **kwargs)
+
+    def generate_dict_entry(self, *args, **kwargs):
+        template = deepcopy(self.template)
+        template = template.replace('<value>', str(self.value))
+        return template
 
 
 class TurbulentTemperatureCoupledBaffleMixed(BoundaryCondition):

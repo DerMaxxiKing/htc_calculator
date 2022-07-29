@@ -16,6 +16,7 @@ from .meshing.block_mesh import create_blocks_from_2d_mesh, Mesh, BlockMesh, \
     CompBlock, NoNormal, bottom_side_patch, top_side_patch, CellZone, wall_patch, extrude_2d_mesh, Block, \
     BlockMeshEdge, BlockMeshFace, PipeMesh, ConstructionMesh, LayerMesh, UpperPipeLayerMesh, LowerPipeLayerMesh, \
     add_face_contacts, PipeLayerMesh
+from .meshing.mesh_config import pipe_cut_section_min_refinement_level, pipe_cut_section_max_refinement_level
 from .logger import logger
 from .tools import export_objects, split_wire_by_projected_vertices
 from .case.case import OFCase
@@ -79,6 +80,12 @@ class ActivatedReferenceFace(ReferenceFace):
         self.bending_radius = kwargs.get('bending_radius', 0.05)
 
         self.reference_edge_id = kwargs.get('start_edge', 0)
+
+        self.pipe_cut_section_min_refinement_level = kwargs.get('pipe_cut_section_min_refinement_level',
+                                                                pipe_cut_section_min_refinement_level)
+
+        self.pipe_cut_section_max_refinement_level = kwargs.get('pipe_cut_section_max_refinement_level',
+                                                                pipe_cut_section_max_refinement_level)
 
         # self.integrate_pipe()
 

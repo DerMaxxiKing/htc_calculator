@@ -2,6 +2,7 @@ import copy
 import posix
 import re
 from copy import deepcopy
+from collections.abc import Iterable
 import subprocess
 import functools
 import operator
@@ -4508,10 +4509,30 @@ class BlockMesh(object):
 
         logger.info(f"Creating boundary faces")
 
+        def get_face_mat(fc, return_all=False):
+            if isinstance(fc, Iterable):
+                materials = {get_face_mat(x) for x in fc}
+                if materials.__len__() > 1:
+                    if not return_all:
+                        logger.warning(f'Multiple materials for faces {fc} found: {materials}')
+                if return_all:
+                    list(materials)
+                else:
+                    return list(materials)[0]
+
+            if fc.blocks.__len__() == 1:
+                return list(fc.blocks)[0].cell_zone.material
+            else:
+                if return_all:
+                    raise NotImplementedError
+                else:
+                    raise Exception(f'Face {fc} belongs to multiple blocks')
+
         for boundary in self.mesh.boundaries.values():
             # Todo: add interfaces
             assigned_faces.update(boundary.faces)
 
+            face_mat = get_face_mat(boundary.faces)
             face_bc = FaceBoundaryCondition.from_block_mesh_boundary(boundary)
 
             face = Face(name='face_' + boundary.name,
@@ -4519,7 +4540,8 @@ class BlockMesh(object):
                         block_mesh_faces=boundary.faces,
                         block_mesh_boundary_condition=boundary,
                         boundary_condition=face_bc,
-                        solid=mesh_solid)
+                        solid=mesh_solid,
+                        material=face_mat)
             boundary.geo_face = face
             mesh_solid._faces.append(face)
             mesh_solid.features[boundary.name] = face
@@ -4543,14 +4565,20 @@ class BlockMesh(object):
                                 (list(face.blocks)[1].cell_zone in i_interface):
                             i_faces.append(face)
 
+        interfaces_face_dict = {key: (FCPart.makeShell([x.fc_face for x in i_faces]),
+                                      FCPart.makeShell([x.fc_face for x in i_faces])) for key, i_faces in
+                                interfaces_dict.items() if i_faces}
+
         local_wall_patch = BlockMeshBoundary.copy_to_mesh(wall_patch, self.mesh)
         face_bc = FaceBoundaryCondition.from_block_mesh_boundary(local_wall_patch)
+        face_mat = get_face_mat(wall_patches)
 
         face = Face(name='Wall Face',
                     fc_face=FCPart.makeShell([x.fc_face for x in wall_patches]),
                     block_mesh_faces=wall_patches,
                     block_mesh_boundary_condition=local_wall_patch,
-                    boundary_condition=face_bc)
+                    boundary_condition=face_bc,
+                    material=face_mat)
         local_wall_patch.geo_face = face
         mesh_solid._faces.append(face)
         mesh_solid.features['walls'] = face
@@ -4558,11 +4586,29 @@ class BlockMesh(object):
         internal_interfaces = []
         for interface, i_faces in interfaces_dict.items():
             if i_faces:
-                face = Face(fc_face=FCPart.makeShell([x.fc_face for x in i_faces]),
-                            name=f'{interface[0].txt_id}_to_{interface[1].txt_id}')
-                mesh_solid._faces.append(face)
+                fc_face = interfaces_face_dict[interface][0]
+                face1 = Face(fc_face=fc_face,
+                             name=f'{interface[0].txt_id}_to_{interface[1].txt_id}',
+                             material=interface[0].material)
+                mesh_solid._faces.append(face1)
                 mesh_solid.features[f'{interface[0].txt_id}_to_{interface[1].txt_id}'] = face
-                internal_interfaces.append(face)
+                internal_interfaces.append(face1)
+
+                fc_face = interfaces_face_dict[interface][1]
+                face2 = Face(fc_face=fc_face,
+                            name=f'{interface[1].txt_id}_to_{interface[0].txt_id}',
+                             material=interface[1].material)
+                mesh_solid._faces.append(face2)
+                mesh_solid.features[f'{interface[1].txt_id}_to_{interface[0].txt_id}'] = face
+                internal_interfaces.append(face2)
+
+                face1.boundary_condition = Interface(interface_type='mapped_wall',
+                                                     face_1=face1,
+                                                     face_2=face2)
+
+                face2.boundary_condition = Interface(interface_type='mapped_wall',
+                                                     face_1=face2,
+                                                     face_2=face1)
 
         mesh_solid.features['internal_interfaces'] = internal_interfaces
         interface_block_mesh_bc = BlockMeshBoundary(name='Interface to Layer Material',
@@ -4570,6 +4616,7 @@ class BlockMesh(object):
                                                     user_bc=None)
 
         # add interfaces
+        face_mat = get_face_mat([*self.bottom_faces, *self.top_faces, *self.interfaces])
         face = Face(fc_face=FCPart.makeShell([x.fc_face for x in [*self.bottom_faces,
                                                                   *self.top_faces,
                                                                   *self.interfaces]]),
@@ -4577,7 +4624,8 @@ class BlockMesh(object):
                                       *self.top_faces,
                                       *self.interfaces],
                     boundary_condition=Interface(),
-                    block_mesh_boundary_condition=interface_block_mesh_bc)
+                    block_mesh_boundary_condition=interface_block_mesh_bc,
+                    material=face_mat)
 
         interface_block_mesh_bc.geo_face = face
         mesh_solid._faces.append(face)

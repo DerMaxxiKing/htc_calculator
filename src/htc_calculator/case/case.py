@@ -6,6 +6,7 @@ import stat
 import subprocess
 from subprocess import Popen, PIPE, STDOUT
 from re import findall, MULTILINE
+from typing import Union
 
 from ..config import work_dir, n_proc, use_ssh
 from ..ssh import shell_handler
@@ -28,6 +29,7 @@ except ImportError:
     import importlib_resources as pkg_resources
 
 from . import case_resources
+from .case_resources import fluid as fluid_resources
 
 # import FreeCAD
 # import Part as FCPart
@@ -36,6 +38,8 @@ from . import case_resources
 class TabsBC(object):
 
     def __init__(self, *args, **kwargs):
+
+        self._g_entry = None
 
         self.inlet_volume_flow = kwargs.get('inlet_volume_flow', 4.1666e-5)     # volume flow rate in m³/s
         self.inlet_temperature = kwargs.get('inlet_temperature', 323.15)     # Inlet temperature in K
@@ -53,6 +57,31 @@ class TabsBC(object):
         self.initial_temperature = kwargs.get('initial_temperatures', 293.15)
         self.cell_zone_initial_temperatures = kwargs.get('initial_temperatures', None)
 
+        self.g = kwargs.get('g', None)  # Gravity in x, y, z direction
+
+    @property
+    def g_entry(self):
+        if self._g_entry is None:
+            self._g_entry = self.generate_g_entry()
+        return self._g_entry
+
+    def generate_g_entry(self):
+        entry = pkg_resources.read_text(fluid_resources, 'g')
+        entry = entry.replace('<material_id>', '')
+        entry = entry.replace('<material_name>', 'all regions')
+        return entry
+
+    def init_directory(self, case_dir):
+        os.makedirs(os.path.join(case_dir, 'constant'), exist_ok=True)
+        os.makedirs(os.path.join(case_dir, 'system'), exist_ok=True)
+        os.makedirs(os.path.join(case_dir, '0'), exist_ok=True)
+
+    def write_g(self, case_dir):
+        self.init_directory(case_dir)
+        full_filename = os.path.join(case_dir, 'constant', 'g')
+        with open(full_filename, "w") as f:
+            f.write(self.g_entry)
+
 
 class OFCase(object):
 
@@ -65,7 +94,7 @@ class OFCase(object):
         self.reference_face = kwargs.get('reference_face')
 
         self._n_proc = None
-        self.n_proc = kwargs.get('n_proc', config.n_proc)
+        self.n_proc: int = kwargs.get('n_proc', config.n_proc)
 
         self._case_dir = None
         self._block_mesh = None
@@ -81,8 +110,8 @@ class OFCase(object):
         self._all_clean = None
         self._all_run = None
 
-        self.case_dir = kwargs.get('case_dir', None)
-        self.bc = kwargs.get('bc', None)
+        self.case_dir: Union[str, None] = kwargs.get('case_dir', None)
+        self.bc: Union[TabsBC, None] = kwargs.get('bc', None)
         self.create_patch_dict = kwargs.get('create_patch_dict', CreatePatchDict(case_dir=self.case_dir))
 
         self.function_objects = FOMetaMock.instances
@@ -362,6 +391,12 @@ class OFCase(object):
         else:
             logger.error(f"{res.stderr.decode('ascii')}")
         return True
+
+    def run_change_dict(self, case_dir=None, regions=None):
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        shell_handler.run_change_dict(self.case_dir, regions=regions)
 
     def run_allrun(self):
         logger.info(f'Running solver....')
@@ -770,6 +805,7 @@ class OFCase(object):
         self.write_fv_solution()
         self.write_all_run()
         self.write_all_clean()
+        self.bc.write_g(case_dir=self.case_dir)
 
         assembly = self.reference_face.assembly
 
@@ -858,9 +894,33 @@ class OFCase(object):
         side_1_face = assembly.features['pipe_mesh_solid'].features['interfaces']
         side_2_face = assembly.features['pipe_layer_solid'].features['pipe_mesh_interfaces']
 
-        side_1_face.boundary_condition = Interface(face_1=side_1_face, face_2=side_2_face)
-        side_2_face.boundary_condition = Interface(face_1=side_2_face, face_2=side_1_face)
+        side_1_face.boundary_condition = Interface(type='mapped_wall', face_1=side_1_face, face_2=side_2_face)
+        side_2_face.boundary_condition = Interface(type='mapped_wall', face_1=side_2_face, face_2=side_1_face)
 
+        assembly_materials = []
+        for solid in assembly.solids:
+
+            if isinstance(solid, MultiMaterialSolid):
+                for face in solid.faces:
+                    if face.material is None:
+                        continue
+                    mat = face.material
+                    if mat not in assembly_materials:
+                        assembly_materials.append(mat)
+                    mat.boundaries[face] = face.boundary_condition
+            else:
+                mat = solid.material
+                if mat not in assembly_materials:
+                    assembly_materials.append(mat)
+
+                for face in solid.faces:
+                    mat.boundaries[face] = face.boundary_condition
+
+        for assembly_material in assembly_materials:
+            assembly_material.write_change_dict(case_dir=self.case_dir)
+            print('done')
+
+        self.run_change_dict()
 
         print('done')
 
