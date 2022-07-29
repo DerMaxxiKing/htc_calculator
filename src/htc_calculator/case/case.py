@@ -889,8 +889,8 @@ class OFCase(object):
                     raise Exception(f'Could not find base faces for layer {i+1} in features: solid {next_layer_solid}.\n '
                                     f'Features are: {next_layer_solid.features.keys()}')
 
-                side_1_face.boundary_condition = Interface(face_1=side_1_face, face_2=side_2_face)
-                side_2_face.boundary_condition = Interface(face_1=side_2_face, face_2=side_1_face)
+                side_1_face.boundary_condition = Interface(type='mapped_wall', face_1=side_1_face, face_2=side_2_face)
+                side_2_face.boundary_condition = Interface(type='mapped_wall', face_1=side_2_face, face_2=side_1_face)
 
             if 'side_faces' in solid.features:
                 solid.features['side_faces'].boundary_condition = wall

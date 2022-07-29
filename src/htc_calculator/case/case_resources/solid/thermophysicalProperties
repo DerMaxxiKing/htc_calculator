@@ -22,10 +22,10 @@ thermoType
     type            heSolidThermo;
     mixture         pureMixture;
     transport       constIso;
-    thermo          eConst;
+    thermo          hConst;
     equationOfState rhoConst;
     specie          specie;
-    energy          sensibleInternalEnergy;
+    energy          sensibleEnthalpy;
 }
 
 mixture

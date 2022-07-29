@@ -291,6 +291,8 @@ class TemperatureCoupledBaffleMixed(BoundaryCondition):
         {
             type            compressible::turbulentTemperatureCoupledBaffleMixed;
             value           <value>;
+            kappaMethod     <kappaMethod>;
+            kappa           <kappa>;
             Tnbr            T;
         }
         """)
@@ -304,10 +306,14 @@ class TemperatureCoupledBaffleMixed(BoundaryCondition):
         :param kwargs: inletValue	Inlet value for reverse flow	yes
         """
         BoundaryCondition.__init__(self, *args, **kwargs)
+        self.kappa_method = kwargs.get('kappaMethod', 'lookup')
+        self.kappa = kwargs.get('kappa', 'kappa')
 
     def generate_dict_entry(self, *args, **kwargs):
         template = deepcopy(self.template)
         template = template.replace('<value>', str(self.value))
+        template = template.replace('<kappaMethod>', str(self.kappa_method))
+        template = template.replace('<kappa>', str(self.kappa))
         return template
 
 

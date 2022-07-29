@@ -414,6 +414,7 @@ def get_latest_timestep(directory):
 
 
 dimension_lookup_dict = {'alphat': '[1 -1 -1 0 0 0 0]',
+                         'epsilon': '[ 0 2 -3 0 0 0 0 ]',
                          'k': '[0 2 -2 0 0 0 0]',
                          'mut': '[1 -1 -1 0 0 0 0]',
                          'nut': '[0 2 -1 0 0 0 0]',
@@ -424,6 +425,7 @@ dimension_lookup_dict = {'alphat': '[1 -1 -1 0 0 0 0]',
                          'U': '[0 1 -1 0 0 0 0]'}
 
 internal_field_lookup_dict = {'alphat': 'uniform 0',
+                              'epsilon': 'uniform 0.01',
                               'k': 'uniform 0.00015',
                               'mut': 'uniform 0',
                               'nut': 'uniform 0',
@@ -434,6 +436,7 @@ internal_field_lookup_dict = {'alphat': 'uniform 0',
                               'U': 'uniform (0 0 0)'}
 
 class_lookup_dict = {'alphat': 'volScalarField',
+                     'epsilon': 'volScalarField',
                      'k': 'volScalarField',
                      'mut': 'volScalarField',
                      'nut': 'volScalarField',
@@ -452,6 +455,8 @@ def write_empty_field(field_name, case_dir, region_id):
        \\    /   O peration     | Website:  https://openfoam.org
         \\  /    A nd           | Version:  9
          \\/     M anipulation  |
+         
+         File created by TABS calculator
     \*---------------------------------------------------------------------------*/
     FoamFile
     {

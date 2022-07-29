@@ -49,6 +49,14 @@ class U(BCFile):
                                                     }
                                                     """)
 
+    @property
+    def internal_field_value(self):
+        return 'uniform (' + ' '.join([str(x) for x in self._internal_field_value.tolist()]) + ')'
+
+    @internal_field_value.setter
+    def internal_field_value(self, value):
+        self._internal_field_value = value
+
 
 class PressureInletOutletVelocity(BoundaryCondition):
 

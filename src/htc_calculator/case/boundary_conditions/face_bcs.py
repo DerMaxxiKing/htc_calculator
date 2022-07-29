@@ -165,6 +165,9 @@ class Interface(FaceBoundaryCondition):
             self.type = 'wall'
             self.user_bc = FluidSolidInterface()
 
+        self.kappa_method = kwargs.get('kappaMethod', 'lookup')
+        self.kappa = kwargs.get('kappa', 'kappa')
+
     @property
     def boundary_entry(self):
 
@@ -182,8 +185,8 @@ class Interface(FaceBoundaryCondition):
                     '\t\tsampleMode       nearestPatchFace;\n'
                     f'\t\tsamplePatch     {self.face_2.txt_id};\n'
                     f'\t\tsampleRegion    {self.face_2.material.txt_id};\n'
-                    f'\t\tkappaMethod     lookup;\n'
-                    f'\t\tkappa           kappa;'
+                    f'\t\tkappaMethod     {self.kappa_method};\n'
+                    f'\t\tkappa           {self.kappa};'
                     f"\t{'}'}")
 
 
