@@ -179,9 +179,11 @@ class Interface(FaceBoundaryCondition):
         elif self.interface_type == 'mapped_wall':
             return ('\t{\n'
                     '\t\ttype             mappedWall;\n'
-                    '\t\tsampleMode       nearestPatchFace;'
+                    '\t\tsampleMode       nearestPatchFace;\n'
                     f'\t\tsamplePatch     {self.face_2.txt_id};\n'
                     f'\t\tsampleRegion    {self.face_2.material.txt_id};\n'
+                    f'\t\tkappaMethod     lookup;\n'
+                    f'\t\tkappa           kappa;'
                     f"\t{'}'}")
 
 

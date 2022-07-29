@@ -18,7 +18,7 @@ from .meshing.block_mesh import create_blocks_from_2d_mesh, Mesh, BlockMesh, \
     BlockMeshEdge, BlockMeshFace, PipeMesh, ConstructionMesh, LayerMesh, UpperPipeLayerMesh, LowerPipeLayerMesh, \
     add_face_contacts, PipeLayerMesh
 
-
+from .ssh import shell_handler
 from .meshing.surface_mesh_parameters import default_surface_mesh_parameter
 from .face import Face
 from .tools import export_objects, add_radius_to_edges, vector_to_np_array, perpendicular_vector, extrude, create_pipe, create_pipe_wire, add_radius_to_edges
@@ -709,6 +709,40 @@ class MultiMaterialSolid(Solid):
 
     def __init__(self, *args, **kwargs):
         Solid.__init__(self, *args, **kwargs)
+
+    # def run_meshing(self,
+    #                 parallel=True,
+    #                 init_case=True,
+    #                 split_mesh_regions=True):
+    #
+    #     Solid.run_meshing(self, parallel=parallel, init_case=init_case, split_mesh_regions=split_mesh_regions)
+    #     shell_handler.run_split_mesh_regions(workdir=self.case_dir)
+
+    def rename_internal_interfaces(self, case_dir=None):
+
+        if case_dir is None:
+            case_dir = self.case_dir
+
+        # rename interface patches and sample patches:
+        for internal_interface in self.features['internal_interfaces']:
+
+            full_filename = os.path.join(case_dir, 'constant', internal_interface.material.txt_id, 'polyMesh',
+                                         'boundary')
+            with open(full_filename, "r") as f:
+                content = f.read()
+
+            content = content.replace(
+                f'{internal_interface.material.txt_id}_to_{internal_interface.boundary_condition.face_2.material.txt_id}',
+                internal_interface.txt_id)
+
+            content = content.replace(
+                f'{internal_interface.boundary_condition.face_2.material.txt_id}_to_{internal_interface.material.txt_id}',
+                internal_interface.boundary_condition.face_2.txt_id)
+
+            with open(full_filename, "w") as f:
+                f.write(content)
+
+        print('done')
 
 
 class PipeSolid(Solid):

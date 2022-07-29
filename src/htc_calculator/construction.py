@@ -302,6 +302,11 @@ class Solid(Material):
         self.write_fvschemes(case_dir)
         self.write_fvsolution(case_dir)
 
+        if isinstance(self, Fluid):
+            self.write_thermo_physic_transport(case_dir)
+            self.write_momentum_transport(case_dir)
+            self.write_g(case_dir)
+
     def __repr__(self):
         return f'Solid material {self.name} ({self.id})'
 
@@ -416,7 +421,7 @@ class Fluid(Material):
     def write_momentum_transport(self, case_dir):
         # https://cpp.openfoam.org/v8/classFoam_1_1turbulenceThermophysicalTransportModels_1_1eddyDiffusivity.html#a10501494309552f678d858cb7de6c1d3
         self.init_directory(case_dir)
-        full_filename = os.path.join(case_dir, 'constant', str(self.txt_id), 'momentumTransport')
+        full_filename = os.path.join(case_dir, 'constant', str(self.txt_id), 'turbulenceProperties')
         with open(full_filename, "w") as f:
             f.write(self.momentum_transport_entry)
 

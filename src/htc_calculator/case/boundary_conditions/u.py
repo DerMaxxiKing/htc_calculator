@@ -6,7 +6,7 @@ from inspect import cleandoc
 
 default_value = np.array([0, 0, 0])
 
-field_template = cleandoc("""
+u_field_template = cleandoc("""
 /*--------------------------------*- C++ -*----------------------------------*\
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
@@ -25,7 +25,7 @@ FoamFile
 
 dimensions      [ 0 1 -1 0 0 0 0 ];
 
-internalField   <value>;
+internalField   uniform ( <value> );
 
 boundaryField
 {
@@ -40,7 +40,7 @@ boundaryField
 
 class U(BCFile):
     default_value = default_value
-    field_template = field_template
+    field_template = u_field_template
     type = 'U'
     default_entry = cleandoc("""
                                                     ".*"

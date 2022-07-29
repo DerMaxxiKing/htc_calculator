@@ -252,6 +252,7 @@ class ShellHandler:
         return shin, shout, sherr
 
     def run_split_mesh_regions(self, workdir, options=None):
+        logger.info(f"Running split mesh regions in {workdir}")
         if options is None:
             cmd = 'splitMeshRegions -cellZonesOnly -noFunctionObjects -overwrite  2>&1 | tee splitMeshRegions.log'
         else:
@@ -269,6 +270,8 @@ class ShellHandler:
                         f"Directory: {workdir}\n\n "
                         f"{output}")
         self.execute(f'paraFoam -touchAll', cwd=workdir)
+
+        logger.info(f"Successfully ran splitMeshRegions in {workdir}")
 
         return shin, shout, sherr
 
@@ -354,7 +357,7 @@ class ShellHandler:
         res = self.execute(f'foamListRegions', cwd=workdir)
         return [x.rstrip('\n') for x in res[1][0:-1]]
 
-    def run_change_dict(self, workdir, regions=None):
+    def run_change_dict(self, workdir, regions=None, init_fields=True):
         if regions is None:
             regions = self.list_regions(workdir)
 
@@ -372,7 +375,8 @@ class ShellHandler:
             for key in of_dict.values.keys():
                 if key in ['FoamFile', 'boundary']:
                     continue
-                write_empty_field(key, workdir, region)
+                if init_fields:
+                    write_empty_field(key, workdir, region)
 
             logger.info(f'Running changeDictionary for region {region} in {workdir}')
             res = self.execute(f'changeDictionary -region {region}', cwd=workdir)
@@ -409,6 +413,37 @@ def get_latest_timestep(directory):
     # return latest_ts
 
 
+dimension_lookup_dict = {'alphat': '[1 -1 -1 0 0 0 0]',
+                         'k': '[0 2 -2 0 0 0 0]',
+                         'mut': '[1 -1 -1 0 0 0 0]',
+                         'nut': '[0 2 -1 0 0 0 0]',
+                         'omega': '[0 0 -1 0 0 0 0]',
+                         'p': '[1 -1 -2 0 0 0 0]',
+                         'p_rgh': '[1 -1 -2 0 0 0 0]',
+                         'T': '[0 0 0 1 0 0 0]',
+                         'U': '[0 1 -1 0 0 0 0]'}
+
+internal_field_lookup_dict = {'alphat': 'uniform 0',
+                              'k': 'uniform 0.00015',
+                              'mut': 'uniform 0',
+                              'nut': 'uniform 0',
+                              'omega': 'uniform 0.2',
+                              'p': 'uniform 100000',
+                              'p_rgh': 'uniform 100000',
+                              'T': 'uniform 293.15',
+                              'U': 'uniform (0 0 0)'}
+
+class_lookup_dict = {'alphat': 'volScalarField',
+                     'k': 'volScalarField',
+                     'mut': 'volScalarField',
+                     'nut': 'volScalarField',
+                     'omega': 'volScalarField',
+                     'p': 'volScalarField',
+                     'p_rgh': 'volScalarField',
+                     'T': 'volScalarField',
+                     'U': 'volVectorField'}
+
+
 def write_empty_field(field_name, case_dir, region_id):
     field_template = cleandoc("""
     /*--------------------------------*- C++ -*----------------------------------*\
@@ -421,15 +456,15 @@ def write_empty_field(field_name, case_dir, region_id):
     FoamFile
     {
         format      ascii;
-        class       volScalarField;
+        class       <class>;
         location    "0/<region_id>";
         object      <field_name>;
     }
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-    dimensions      [ 0 0 0 1 0 0 0 ];
+    dimensions      <dimensions>;
 
-    internalField   0;
+    internalField   <internal_field>;
 
     boundaryField
     {
@@ -446,6 +481,9 @@ def write_empty_field(field_name, case_dir, region_id):
     field_str = field_template
     field_str = field_str.replace('<field_name>', field_name)
     field_str = field_str.replace('<region_id>', region_id)
+    field_str = field_str.replace('<dimensions>', dimension_lookup_dict[field_name])
+    field_str = field_str.replace('<internal_field>', internal_field_lookup_dict[field_name])
+    field_str = field_str.replace('<class>', class_lookup_dict[field_name])
 
     os.makedirs(os.path.join(case_dir, '0', region_id), exist_ok=True)
     full_filename = os.path.join(case_dir, '0', region_id, field_name)

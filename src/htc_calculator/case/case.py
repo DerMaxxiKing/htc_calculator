@@ -818,8 +818,8 @@ class OFCase(object):
             if not solid.mesh_ok:
                 raise Exception(f'Mesh of{solid.name} is not ok')
             # solid.run_check_mesh()
-            if isinstance(solid, MultiMaterialSolid):
-                shell_handler.run_split_mesh_regions(workdir=solid.case_dir)
+            # if isinstance(solid, MultiMaterialSolid):
+            #     shell_handler.run_split_mesh_regions(workdir=solid.case_dir)
 
             if i == 0:
                 shell_handler.copy_mesh(solid.case_dir, self.case_dir)
@@ -829,9 +829,14 @@ class OFCase(object):
 
         logger.info(f'Successfully created and merged meshes')
 
-        logger.info(f'Splitting mesh ...')
+        # logger.info(f'Splitting mesh ...')
         shell_handler.run_split_mesh_regions(workdir=self.case_dir)
         shell_handler.run_parafoam(workdir=self.case_dir)
+
+        for i, solid in enumerate(assembly.solids):
+            if isinstance(solid, MultiMaterialSolid):
+                solid.rename_internal_interfaces(case_dir=self.case_dir)
+
         # logger.info(f'Successfully split mesh regions')
 
         materials = set()
@@ -840,7 +845,7 @@ class OFCase(object):
         cell_zones = [x.cell_zone for x in materials]
 
         for material in materials:
-            material.cell_zone.write_to_of(self.case_dir)
+            material.write_to_of(self.case_dir)
         # write region properties:
         write_region_properties(cell_zones, self.case_dir)
 
